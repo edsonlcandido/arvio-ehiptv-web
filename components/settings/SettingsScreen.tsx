@@ -9,6 +9,7 @@ import { defaultCatalogs, mergeCatalogs } from "@/lib/catalogs";
 import { hasSupabaseConfig, hasTraktConfig } from "@/lib/config";
 import { defaultSettings, useApp } from "@/lib/store";
 import type { AppSettings, CatalogConfig, HomeServerConfig } from "@/lib/types";
+import { generateUUID } from "@/lib/uuid";
 
 const settingsKey = "arvio.web.settings";
 
@@ -287,7 +288,7 @@ function HomeServerSection() {
         <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" />
         <button className="primary" onClick={() => {
           if (!url.trim()) return;
-          update([{ id: crypto.randomUUID(), type, name: name || type, url: url.trim(), token: token.trim(), username: username.trim() || undefined, password: password || undefined, enabled: true }, ...servers]);
+          update([{ id: generateUUID(), type, name: name || type, url: url.trim(), token: token.trim(), username: username.trim() || undefined, password: password || undefined, enabled: true }, ...servers]);
           setName(""); setUrl(""); setToken(""); setUsername(""); setPassword("");
         }}><Plus size={18} /> Add</button>
       </div>
@@ -336,7 +337,7 @@ function CatalogsSection() {
         <input value={customCatalogUrl} onChange={(e) => setCustomCatalogUrl(e.target.value)} placeholder="https://mdblist.com/lists/user/list" />
         <button className="primary" onClick={() => {
           if (!customCatalogUrl.trim()) return;
-          updateCatalogs([{ id: `custom_${crypto.randomUUID()}`, name: "Custom MDBList", sourceType: "mdblist", mediaType: "all", sourceUrl: customCatalogUrl.trim(), enabled: true }, ...catalogs]);
+          updateCatalogs([{ id: `custom_${generateUUID()}`, name: "Custom MDBList", sourceType: "mdblist", mediaType: "all", sourceUrl: customCatalogUrl.trim(), enabled: true }, ...catalogs]);
           setCustomCatalogUrl("");
         }}><Plus size={18} /> Add</button>
         <button className="secondary text-button" onClick={() => updateCatalogs(defaultCatalogs)}><RotateCcw size={18} /> Reset</button>

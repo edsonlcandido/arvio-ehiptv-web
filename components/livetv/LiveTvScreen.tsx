@@ -4,6 +4,7 @@ import { BadgeCheck, Eye, EyeOff, Plus, Star, Tv } from "lucide-react";
 import { useState } from "react";
 import { useApp } from "@/lib/store";
 import type { IptvChannel, IptvSnapshot } from "@/lib/types";
+import { generateUUID } from "@/lib/uuid";
 
 function fmtTime(ms: number): string {
   try {
@@ -61,7 +62,7 @@ export function LiveTvScreen() {
             if (!url.trim()) return;
             setSettings({
               ...settings,
-              iptvPlaylists: [{ id: crypto.randomUUID(), name: name || "Playlist", m3uUrl: url, epgUrl, enabled: true }, ...playlists]
+              iptvPlaylists: [{ id: generateUUID(), name: name || "Playlist", m3uUrl: url, epgUrl, enabled: true }, ...playlists]
             });
             setName("");
             setUrl("");
