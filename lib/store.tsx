@@ -25,6 +25,7 @@ import type {
   Profile,
   StreamSource
 } from "./types";
+import { proxiedUrl } from "./http";
 
 export const authClient = new AuthClient();
 export const traktClient = new TraktClient();
@@ -439,7 +440,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addonName: "Live TV",
       quality: "Live",
       size: "",
-      url: channel.streamUrl,
+      url: proxiedUrl(channel.streamUrl),
       description: channel.group
     });
   }, []);
