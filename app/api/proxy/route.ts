@@ -135,15 +135,22 @@ async function handleProxy(request: NextRequest) {
     return jsonError(`Upstream error: ${message}`, 502);
   }
 
-  // If we ever get redirected into our own proxy origin, abort (defense).
+  // Compute the URL we actually fetched (post-redirect). Critical for
+  // IPTV servers that hand out DNS URLs (e.g. dnstv.top) and 302 to a
+  // short-lived numerical-IP URL carrying an auth token (e.g. ?token=ABC).
+  // All subsequent segment / key / map URLs in the manifest must be
+  // resolved against this FINAL URL, not the original, or the token is
+  // lost and segments 404 after the token expires.
+  let resolvedUrl = raw;
   try {
-    const finalUrl = new URL(response.url);
+    resolvedUrl = new URL(response.url).toString();
     const requestOrigin = new URL(request.url).origin;
-    if (finalUrl.origin === requestOrigin && finalUrl.pathname.startsWith("/api/proxy")) {
+    const finalParsed = new URL(resolvedUrl);
+    if (finalParsed.origin === requestOrigin && finalParsed.pathname.startsWith("/api/proxy")) {
       return jsonError("Proxy redirect loop detected", 508);
     }
   } catch {
-    /* ignore */
+    /* ignore parse errors, keep using raw */
   }
 
   const upstreamContentType = response.headers.get("content-type") ?? "";
@@ -169,11 +176,12 @@ async function handleProxy(request: NextRequest) {
   }
 
   // If it's an HLS manifest, rewrite ALL URLs (segments, keys, maps, media)
-  // so they pass through this proxy.
+  // so they pass through this proxy. We resolve relative URLs against
+  // `resolvedUrl` (post-redirect, with token) instead of the original `raw`.
   if (isHls && response.body) {
     const text = await response.text();
     const proxyOrigin = new URL(request.url).origin;
-    const rewritten = rewriteHlsManifest(text, raw, proxyOrigin);
+    const rewritten = rewriteHlsManifest(text, resolvedUrl, proxyOrigin);
     outHeaders.set("content-type", upstreamContentType || "application/vnd.apple.mpegurl");
     return new NextResponse(rewritten, {
       status: response.status,
