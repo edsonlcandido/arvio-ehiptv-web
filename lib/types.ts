@@ -229,6 +229,15 @@ export interface IptvPlaylistEntry {
   epgUrl?: string;
   epgUrls?: string[];
   enabled: boolean;
+  // Xtream Codes native fields — when all three are set the playlist is
+  // loaded directly via /api/xtream. If absent, the code falls back to
+  // parsing m3uUrl as a regular M3U. Auto-detected for m3u.php / get.php /
+  // playlist URLs that already carry credentials in the query string.
+  xtreamServer?: string;
+  xtreamUser?: string;
+  xtreamPass?: string;
+  xtreamIncludeVod?: boolean;
+  xtreamIncludeSeries?: boolean;
 }
 
 export interface IptvChannel {
