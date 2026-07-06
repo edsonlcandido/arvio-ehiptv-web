@@ -273,14 +273,29 @@ async function fetchSeriesInfo(
   const now = Date.now();
   if (cached && cached.expiresAt > now) return cached.data;
 
-  const xtreamUrl = new URL("/api/xtream", window.location.origin);
-  xtreamUrl.searchParams.set("server", service.baseUrl);
-  xtreamUrl.searchParams.set("user", service.username);
-  xtreamUrl.searchParams.set("pass", service.password);
-  xtreamUrl.searchParams.set("action", "get_series_info");
-  xtreamUrl.searchParams.set("xtream_series_id", String(seriesId));
+  // Build the Xtream URL the same way the operator-side helper does it
+  // (matches the shape that every Xtream provider implements):
+  //
+  //   ${PROVIDER_BASE}/player_api.php
+  //     ?username=${user}
+  //     &password=${pass}
+  //     &action=get_series_info
+  //     &series_id=${seriesId}
+  //
+  // We forward the whole URL through /api/xtream so mixed content
+  // (HTTPS page → HTTP dnstv.top) is resolved server-side. No xtream_*
+  // prefix gymnastics — the proxy just relays the URL we give it.
+  const base = service.baseUrl.replace(/\/+$/, "");
+  const upstream = new URL(`${base}/player_api.php`);
+  upstream.searchParams.set("username", service.username);
+  upstream.searchParams.set("password", service.password);
+  upstream.searchParams.set("action", "get_series_info");
+  upstream.searchParams.set("series_id", String(seriesId));
 
-  const data = await jsonRequest<SeriesInfo>(xtreamUrl.toString());
+  const proxyUrl = new URL("/api/xtream", window.location.origin);
+  proxyUrl.searchParams.set("url", upstream.toString());
+
+  const data = await jsonRequest<SeriesInfo>(proxyUrl.toString());
   seriesInfoCache.set(cacheKey, { data, expiresAt: now + SERIES_EPISODE_CACHE_MS });
 
   // Pre-populate the per-episode cache from the same response so that the
