@@ -1,7 +1,7 @@
 "use client";
 
 import { Play, Star, UserCircle, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/lib/store";
 import { getReviews, getSeasonEpisodes } from "@/lib/tmdb";
 import { fetchAvailableEpisodeNumbers, type PlaybackService, type StreamOption } from "@/lib/ehiptv";
@@ -18,14 +18,13 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
   const {
     streams,
     selectedEpisode,
-    loadEpisodeStreams,
-    loadStreamOptions,
     closeDetails,
     openDetails,
     playEhIptv,
     playStream,
     playTrailer,
-    settings
+    settings,
+    loadStreamOptions
   } = useApp();
   const [reviews, setReviews] = useState<ReviewInfo[]>([]);
   const [streamOptions, setStreamOptions] = useState<StreamOption[] | null>(null);
@@ -48,6 +47,22 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
     }).catch(() => undefined);
     return () => { active = false; };
   }, [item.id, item.mediaType, item.isHomeServer, loadStreamOptions]);
+
+  /**
+   * Play a single episode of a series via the Eh!IPTV catalogue.
+   *
+   * The previous implementation wired SeasonEpisodes' click to
+   * `loadEpisodeStreams`, which is the legacy addon-resolution flow (Stremio
+   * manifests). When click came from a catalogue row, no addon would match
+   * the episode and nothing was played. This handler skips addons entirely
+   * and delegates to playEhIptv (which calls buildPlaybackUrl → resolve
+   * episode.id via get_series_info → setActiveStream with a proxied URL).
+   */
+  const playSeriesEpisode = useCallback(async (season: number, episode: number) => {
+    const option = streamOptions?.[0];
+    if (!option) return;
+    await playEhIptv(item, { season, episode }, option);
+  }, [streamOptions, item, playEhIptv]);
 
   const isTv = item.mediaType === "tv";
   // Home-server items play their pre-resolved stream; everything else goes
@@ -128,7 +143,7 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
           <SeasonEpisodes
             item={item}
             selectedEpisode={selectedEpisode}
-            onPlayEpisode={(s, e) => loadEpisodeStreams(item, s, e)}
+            onPlayEpisode={playSeriesEpisode}
             seriesId={streamOptions?.[0]?.id != null ? String(streamOptions[0].id) : null}
             service={(settings.streamServices ?? []).find(
               (candidate) => candidate.enabled && candidate.username && candidate.password && candidate.baseUrl
