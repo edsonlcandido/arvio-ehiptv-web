@@ -374,7 +374,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setBusy("Preparando");
     let url: string;
     try {
-      url = buildPlaybackUrl(service, option, kind, episode);
+      url = await buildPlaybackUrl(service, option, kind, episode);
     } catch (error) {
       setBusy("");
       setToast(error instanceof Error ? error.message : "Não foi possível preparar a reprodução");
