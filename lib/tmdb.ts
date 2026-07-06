@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { filterByEhIptv } from "./ehiptv";
 import { jsonRequest, proxiedUrl } from "./http";
 import type { CatalogConfig, Category, EpisodeInfo, MediaItem, MediaType, ReviewInfo } from "./types";
 
@@ -80,11 +81,10 @@ export async function loadHomeCategories(language = "en-US", catalogs?: CatalogC
       tmdb<TmdbList>("discover/tv", { language, sort_by: "popularity.desc" })
     ]);
     return [
-      { id: "trending_movies", title: "Trending in Movies", items: movies.results.map((x) => mapTmdbItem(x, "movie")) },
-      { id: "trending_tv", title: "Trending in Shows", items: series.results.map((x) => mapTmdbItem(x, "tv")) },
-      { id: "trending_anime", title: "Trending in Anime", items: anime.results.map((x) => mapTmdbItem(x, "tv")) },
-      { id: "popular_movies", title: "Popular Movies", items: popularMovies.results.map((x) => mapTmdbItem(x, "movie")) },
-      { id: "popular_tv", title: "Popular Series", items: popularTv.results.map((x) => mapTmdbItem(x, "tv")) }
+      { id: "trending_movies", title: "Filmes em Alta", items: movies.results.map((x) => mapTmdbItem(x, "movie")) },
+      { id: "trending_tv", title: "Séries em Alta", items: series.results.map((x) => mapTmdbItem(x, "tv")) },
+      { id: "popular_movies", title: "Filmes Populares", items: popularMovies.results.map((x) => mapTmdbItem(x, "movie")) },
+      { id: "popular_tv", title: "Séries Populares", items: popularTv.results.map((x) => mapTmdbItem(x, "tv")) }
     ];
   } catch {
     return fallbackCategories;
@@ -95,10 +95,12 @@ export async function loadCatalog(catalog: CatalogConfig, language = "en-US"): P
   if (!catalog.enabled) return null;
   if (catalog.sourceType === "tmdb" && catalog.endpoint) {
     const response = await tmdb<TmdbList>(catalog.endpoint, { language, ...(catalog.params ?? {}) });
+    const fallbackType: MediaType = catalog.mediaType === "tv" ? "tv" : "movie";
+    const items = await filterByEhIptv(response.results.map((x) => mapTmdbItem(x, fallbackType)));
     return {
       id: catalog.id,
       title: catalog.name,
-      items: response.results.map((x) => mapTmdbItem(x, catalog.mediaType === "tv" ? "tv" : "movie")),
+      items,
       sourceLabel: "TMDB",
       layout: catalog.layout ?? "landscape"
     };
@@ -122,10 +124,11 @@ export async function loadCatalog(catalog: CatalogConfig, language = "en-US"): P
       sort_by: "vote_average.desc",
       "vote_count.gte": 500
     });
+    const items = await filterByEhIptv(response.results.map((x) => mapTmdbItem(x, "tv")));
     return {
       id: catalog.id,
       title: catalog.name,
-      items: response.results.map((x) => mapTmdbItem(x, "tv")),
+      items,
       sourceLabel: "TMDB",
       layout: catalog.layout ?? "landscape"
     };
@@ -149,7 +152,8 @@ async function loadMdblist(catalog: CatalogConfig, language: string) {
     .filter((item): item is { id: number; type: MediaType } => Boolean(item?.id))
     .slice(0, 20);
   const details = await Promise.all(ids.map((item) => getBasicItem(item.type, item.id, language).catch(() => null)));
-  return details.filter((item): item is MediaItem => Boolean(item?.title));
+  const hydrated = details.filter((item): item is MediaItem => Boolean(item?.title));
+  return filterByEhIptv(hydrated);
 }
 
 function extractMdblistIdentity(item: MdblistItem, preferred?: CatalogConfig["mediaType"]) {
@@ -408,7 +412,7 @@ const fallbackItems: MediaItem[] = [
 ];
 
 const fallbackCategories: Category[] = [
-  { id: "continue_watching_demo", title: "Continue Watching", items: fallbackItems.filter((item) => item.progress) },
-  { id: "trending_movies_demo", title: "Trending in Movies", items: fallbackItems.filter((item) => item.mediaType === "movie") },
-  { id: "trending_tv_demo", title: "Trending in Shows", items: fallbackItems.filter((item) => item.mediaType === "tv") }
+  { id: "continue_watching_demo", title: "Continue assistindo", items: fallbackItems.filter((item) => item.progress) },
+  { id: "trending_movies_demo", title: "Filmes em Alta", items: fallbackItems.filter((item) => item.mediaType === "movie") },
+  { id: "trending_tv_demo", title: "Séries em Alta", items: fallbackItems.filter((item) => item.mediaType === "tv") }
 ];

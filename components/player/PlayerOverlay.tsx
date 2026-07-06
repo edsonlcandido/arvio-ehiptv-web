@@ -4,11 +4,9 @@ import {
   ArrowLeft, Loader2, Maximize, Minimize, Pause, Play, SkipForward, Subtitles, Volume2, VolumeX, X
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { config } from "@/lib/config";
-import { saveProgress } from "@/lib/cloud";
 import { proxiedUrl } from "@/lib/http";
 import { attachPlayback } from "@/lib/player";
-import { authClient, traktClient, useApp } from "@/lib/store";
+import { useApp } from "@/lib/store";
 import type { AppSettings, MediaItem, StreamSource } from "@/lib/types";
 
 function youTubeId(url: string): string | null {
@@ -77,7 +75,6 @@ function VideoPlayer({ title, subtitleLabel, stream, item, settings, canAdvance,
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const lastSavedRef = useRef(0);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [playing, setPlaying] = useState(false);
@@ -147,38 +144,11 @@ function VideoPlayer({ title, subtitleLabel, stream, item, settings, canAdvance,
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !item) return undefined;
-    void traktClient.scrobble("start", { mediaType: item.mediaType, tmdbId: item.id, progress: item.progress ?? 0 }).catch(() => undefined);
-    const save = () => {
-      if (!authClient.session || !Number.isFinite(video.duration) || video.duration <= 0) return;
-      const now = Date.now();
-      if (now - lastSavedRef.current < 15_000) return;
-      lastSavedRef.current = now;
-      const progress = Math.min(1, Math.max(0, video.currentTime / video.duration));
-      void saveProgress(authClient, {
-        media_type: item.mediaType,
-        show_tmdb_id: item.id,
-        title: item.title,
-        progress,
-        duration_seconds: Math.round(video.duration),
-        position_seconds: Math.round(video.currentTime),
-        backdrop_path: item.backdrop?.replace(config.backdropBase, "") ?? null,
-        poster_path: item.image?.replace(config.imageBase, "") ?? null,
-        source: stream.addonName,
-        stream_addon_id: stream.addonId ?? null,
-        stream_title: stream.source
-      }).catch(() => undefined);
-    };
     const onEnded = () => {
-      void traktClient.scrobble("stop", { mediaType: item.mediaType, tmdbId: item.id, progress: 100 }).catch(() => undefined);
       if (settings.autoPlayNext && canAdvance) void onAdvance();
     };
-    video.addEventListener("timeupdate", save);
-    video.addEventListener("pause", save);
     video.addEventListener("ended", onEnded);
     return () => {
-      save();
-      video.removeEventListener("timeupdate", save);
-      video.removeEventListener("pause", save);
       video.removeEventListener("ended", onEnded);
     };
   }, [item, stream, settings.autoPlayNext, canAdvance, onAdvance]);

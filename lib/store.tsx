@@ -2,18 +2,13 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { getStreams, installAddon as installAddonManifest, loadLocalAddons, saveLocalAddons } from "./addons";
-import { AuthClient } from "./auth";
 import { defaultCatalogs, mergeCatalogs } from "./catalogs";
-import { getContinueWatching, pullCloudPayload, pullCloudProfiles, saveCloudAddons, saveCloudProfiles, saveCloudSettings } from "./cloud";
 import { loadHomeServerRows } from "./homeserver";
 import { loadIptvSnapshot, loadPlaylists, savePlaylists } from "./iptv";
-import { dedupeMedia, historyToItem, hydrateTraktItems, traktItemToMedia, traktPlaybackToMedia } from "./mappers";
 import { loadStored, saveStored } from "./storage";
 import { getDetails, loadCatalog, searchMedia } from "./tmdb";
-import { TraktClient, type TraktDeviceCode } from "./trakt";
 import type {
   AppSettings,
-  AuthSession,
   Category,
   InstalledAddon,
   IptvChannel,
@@ -22,40 +17,13 @@ import type {
   IptvSnapshot,
   MediaItem,
   NavSection,
-  Profile,
   StreamSource
 } from "./types";
 import { proxiedUrl } from "./http";
 
-export const authClient = new AuthClient();
-export const traktClient = new TraktClient();
-
 const settingsKey = "arvio.web.settings";
-const PROFILES_KEY = "arvio.web.profiles";
-const ACTIVE_PROFILE_KEY = "arvio.web.activeProfileId";
-
-export type AppView = "profiles" | "login" | "app";
-
-function randomProfileColor() {
-  const colors = [0xffe50914, 0xff1db954, 0xff3b82f6, 0xfff59e0b, 0xff8b5cf6, 0xffec4899, 0xff14b8a6, 0xff6366f1];
-  return colors[Math.floor(Math.random() * colors.length)];
-}
-
-function makeProfile(name: string, avatarColor: number, avatarId = 0): Profile {
-  const now = Date.now();
-  return {
-    id: (globalThis.crypto?.randomUUID?.() ?? `p_${now}_${Math.floor(Math.random() * 1e6)}`),
-    name,
-    avatarColor,
-    avatarId,
-    avatarImageVersion: 0,
-    isKidsProfile: false,
-    pin: null,
-    isLocked: false,
-    createdAt: now,
-    lastUsedAt: now
-  };
-}
+const SETTINGS_VERSION_KEY = "arvio.web.settings.version";
+const CURRENT_SETTINGS_VERSION = 2;
 
 export const defaultSettings: AppSettings = {
   autoPlayNext: true,
@@ -64,10 +32,10 @@ export const defaultSettings: AppSettings = {
   trailerAutoPlay: true,
   trailerSound: false,
   trailerDelaySeconds: 2,
-  language: "en-US",
-  defaultSubtitle: "en",
+  language: "pt-BR",
+  defaultSubtitle: "pt",
   secondarySubtitle: "",
-  audioLanguage: "",
+  audioLanguage: "pt-BR",
   subtitleSize: 100,
   subtitleColor: "#ffffff",
   subtitleOffsetMs: 0,
@@ -90,12 +58,12 @@ export const defaultSettings: AppSettings = {
   dnsProvider: "system",
   showLoadingStats: false,
   customUserAgent: "",
-  skipProfileSelection: false,
   cardDensity: "comfortable",
   catalogs: defaultCatalogs,
   hiddenCatalogIds: [],
   disabledAddonIds: [],
   homeServers: [],
+  streamServices: [],
   iptvPlaylists: [],
   favoriteChannelIds: [],
   favoriteGroupIds: [],
@@ -115,20 +83,6 @@ const emptyIptv: IptvSnapshot = {
 };
 
 export interface AppStore {
-  view: AppView;
-  profiles: Profile[];
-  activeProfile: Profile | null;
-  avatarImages: Record<string, string>;
-  manageMode: boolean;
-  setManageMode: (value: boolean) => void;
-  selectProfile: (profile: Profile) => Promise<void>;
-  createProfile: (name: string, avatarColor: number, avatarId: number) => Promise<void>;
-  updateProfile: (profile: Profile) => Promise<void>;
-  deleteProfile: (id: string) => Promise<void>;
-  switchProfile: () => void;
-  goToLogin: () => void;
-  backToProfiles: () => void;
-
   section: NavSection;
   setSection: (section: NavSection) => void;
   categories: Category[];
@@ -154,9 +108,6 @@ export interface AppStore {
   settings: AppSettings;
   setSettings: (next: AppSettings) => void;
   updateSettings: (patch: Partial<AppSettings>) => void;
-  auth: AuthSession | null;
-  traktConnected: boolean;
-  deviceCode: TraktDeviceCode | null;
   busy: string;
   toast: string | null;
   setToast: (value: string | null) => void;
@@ -171,11 +122,6 @@ export interface AppStore {
   installAddon: (url: string) => Promise<void>;
   removeAddon: (addon: InstalledAddon) => Promise<void>;
   setAddonsState: (next: InstalledAddon[]) => Promise<void>;
-  signIn: (email: string, password: string, mode: "sign-in" | "sign-up") => Promise<void>;
-  signOut: () => void;
-  beginTrakt: () => Promise<void>;
-  pollTrakt: () => Promise<void>;
-  disconnectTrakt: () => void;
 }
 
 const AppContext = createContext<AppStore | null>(null);
@@ -204,35 +150,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [results, setResults] = useState<MediaItem[]>([]);
   const [settings, setSettings] = useState<AppSettings>(() => {
     const stored = loadStored<AppSettings>(settingsKey, defaultSettings);
-    return {
+    const merged: AppSettings = {
       ...defaultSettings,
       ...stored,
       iptvPlaylists: loadPlaylists(),
       catalogs: mergeCatalogs(stored.catalogs, stored.hiddenCatalogIds)
     };
+    const versionRaw = loadStored<string>(SETTINGS_VERSION_KEY, "0");
+    const version = parseInt(versionRaw, 10) || 0;
+    if (version < CURRENT_SETTINGS_VERSION) {
+      // v1 → v2: re-apply pt-BR defaults. Older stored settings had
+      // language="en-US" and friends; this lifts them once so the new
+      // defaults actually take effect. After this, user choices in
+      // Settings remain the source of truth.
+      merged.language = "pt-BR";
+      merged.defaultSubtitle = "pt";
+      merged.audioLanguage = "pt-BR";
+      saveStored(SETTINGS_VERSION_KEY, String(CURRENT_SETTINGS_VERSION));
+    }
+    return merged;
   });
-  const [auth, setAuth] = useState(() => authClient.session);
-  const [traktConnected, setTraktConnected] = useState(() => traktClient.isConnected);
-  const [deviceCode, setDeviceCode] = useState<TraktDeviceCode | null>(null);
-  const [busy, setBusy] = useState("Loading ARVIO");
+  const [busy, setBusy] = useState("Carregando ARVIO");
   const [toast, setToast] = useState<string | null>(null);
-
-  const [profiles, setProfiles] = useState<Profile[]>(() => {
-    const stored = loadStored<Profile[]>(PROFILES_KEY, []);
-    return stored.length ? stored : [makeProfile("Profile 1", 0xffe50914, 0)];
-  });
-  const [activeProfileId, setActiveProfileId] = useState<string | null>(() => loadStored<string | null>(ACTIVE_PROFILE_KEY, null));
-  const [avatarImages, setAvatarImages] = useState<Record<string, string>>({});
-  const [manageMode, setManageMode] = useState(false);
-  const [view, setView] = useState<AppView>(() => {
-    const stored = loadStored<Profile[]>(PROFILES_KEY, []);
-    const activeId = loadStored<string | null>(ACTIVE_PROFILE_KEY, null);
-    const skip = loadStored<AppSettings>(settingsKey, defaultSettings).skipProfileSelection;
-    if (skip && activeId && stored.some((p) => p.id === activeId)) return "app";
-    return "profiles";
-  });
-
-  const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? null;
 
   const [heroPreview, setHeroPreview] = useState<MediaItem | null>(null);
   const hero = heroPreview ?? continueWatching[0] ?? categories[0]?.items[0] ?? null;
@@ -243,57 +182,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addonsRef.current = addons;
   }, [addons]);
 
-  const deviceCodeRef = useRef(deviceCode);
-  useEffect(() => {
-    deviceCodeRef.current = deviceCode;
-  }, [deviceCode]);
-
   const persistAddons = useCallback(async (next: InstalledAddon[]) => {
     setAddons(next);
     saveLocalAddons(next);
-    await saveCloudAddons(authClient, next).catch(() => undefined);
   }, []);
 
   const refreshData = useCallback(async () => {
-    setBusy("Syncing catalogs");
+    setBusy("Sincronizando catálogos");
     try {
       const localAddons = loadLocalAddons();
-      const cloud = authClient.session ? await pullCloudPayload(authClient).catch(() => null) : null;
-      const mergedAddons = cloud?.addons?.length ? cloud.addons : localAddons;
-      const addonState = mergedAddons.map((addon) => ({
+      const addonState = localAddons.map((addon) => ({
         ...addon,
         enabled: !settings.disabledAddonIds.includes(addon.id) && addon.enabled !== false
       }));
       setAddons(addonState);
-      saveLocalAddons(mergedAddons);
+      saveLocalAddons(localAddons);
 
       const effectiveCatalogs = mergeCatalogs(settings.catalogs, settings.hiddenCatalogIds);
       setCatalogConfigs(effectiveCatalogs.filter((catalog) => catalog.enabled));
 
       void loadHomeServerRows(settings.homeServers).then(setHomeServerRows).catch(() => setHomeServerRows([]));
 
-      const [historyRows, traktRows, playbackRows, loadedIptv] = await Promise.all([
-        authClient.session ? getContinueWatching(authClient).catch(() => []) : Promise.resolve([]),
-        traktClient.isConnected ? traktClient.watchlist().catch(() => []) : Promise.resolve([]),
-        traktClient.isConnected ? traktClient.playback().catch(() => []) : Promise.resolve([]),
-        loadIptvSnapshot(
-          settings.iptvPlaylists,
-          settings.favoriteChannelIds,
-          settings.favoriteGroupIds,
-          settings.hiddenGroupIds,
-          settings.groupOrder
-        )
-      ]);
+      const loadedIptv = await loadIptvSnapshot(
+        settings.iptvPlaylists,
+        settings.favoriteChannelIds,
+        settings.favoriteGroupIds,
+        settings.hiddenGroupIds,
+        settings.groupOrder
+      );
 
-      const cloudCw = historyRows.map(historyToItem);
-      const traktCw = playbackRows.map(traktPlaybackToMedia);
-      const cw = dedupeMedia([...cloudCw, ...traktCw]);
-      setContinueWatching(cw);
-      setWatchlist(await hydrateTraktItems(traktRows.map(traktItemToMedia)));
-      setCategories(cw.length ? [{ id: "continue_watching", title: "Continue Watching", items: cw }] : []);
+      setContinueWatching([]);
+      setWatchlist([]);
+      setCategories([]);
       setIptvSnapshot(loadedIptv);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Failed to load ARVIO");
+      setToast(error instanceof Error ? error.message : "Falha ao carregar ARVIO");
     } finally {
       setBusy("");
     }
@@ -317,33 +240,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     saveStored(settingsKey, settings);
+    saveStored(SETTINGS_VERSION_KEY, String(CURRENT_SETTINGS_VERSION));
     savePlaylists(settings.iptvPlaylists);
-    void saveCloudSettings(authClient, settings, addons).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
-
-  useEffect(() => {
-    saveStored(PROFILES_KEY, profiles);
-    saveStored(ACTIVE_PROFILE_KEY, activeProfileId);
-  }, [profiles, activeProfileId]);
-
-  // When signed in, pull the shared profiles from the same account_sync_state
-  // payload Android writes to (cloud wins, matching replaceProfilesFromCloud).
-  useEffect(() => {
-    if (!authClient.session) return;
-    let cancelled = false;
-    void pullCloudProfiles(authClient)
-      .then((cloud) => {
-        if (cancelled || !cloud.profiles.length) return;
-        setProfiles(cloud.profiles);
-        setAvatarImages(cloud.avatarImages);
-        if (cloud.activeProfileId) setActiveProfileId(cloud.activeProfileId);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [auth]);
 
   useEffect(() => {
     const handle = setTimeout(async () => {
@@ -471,88 +371,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }));
   }, [persistAddons]);
 
-  const signIn = useCallback(async (email: string, password: string, mode: "sign-in" | "sign-up") => {
-    const session = mode === "sign-up" ? await authClient.signUp(email, password) : await authClient.signIn(email, password);
-    setAuth(session);
-    await refreshData();
-  }, [refreshData]);
-
-  const signOut = useCallback(() => {
-    authClient.signOut();
-    setAuth(null);
-  }, []);
-
-  const beginTrakt = useCallback(async () => {
-    setDeviceCode(await traktClient.beginDeviceLink());
-  }, []);
-
-  const pollTrakt = useCallback(async () => {
-    const code = deviceCodeRef.current;
-    if (!code) return;
-    await traktClient.pollDeviceToken(code.device_code);
-    setTraktConnected(true);
-    setDeviceCode(null);
-    await refreshData();
-  }, [refreshData]);
-
-  const disconnectTrakt = useCallback(() => {
-    traktClient.disconnect();
-    setTraktConnected(false);
-  }, []);
-
-  const persistProfiles = useCallback((next: Profile[], activeId: string | null) => {
-    setProfiles(next);
-    setActiveProfileId(activeId);
-    saveStored(PROFILES_KEY, next);
-    saveStored(ACTIVE_PROFILE_KEY, activeId);
-    void saveCloudProfiles(authClient, next, activeId).catch(() => undefined);
-  }, []);
-
-  const selectProfile = useCallback(async (profile: Profile) => {
-    const updated = profiles.map((p) => (p.id === profile.id ? { ...p, lastUsedAt: Date.now() } : p));
-    persistProfiles(updated, profile.id);
-    setManageMode(false);
-    setView("app");
-    setSection("home");
-    await refreshData();
-  }, [profiles, persistProfiles, refreshData]);
-
-  const createProfile = useCallback(async (name: string, avatarColor: number, avatarId: number) => {
-    const profile = makeProfile(name || "Profile", avatarColor || randomProfileColor(), avatarId);
-    persistProfiles([...profiles, profile], activeProfileId);
-  }, [profiles, activeProfileId, persistProfiles]);
-
-  const updateProfileAction = useCallback(async (profile: Profile) => {
-    persistProfiles(profiles.map((p) => (p.id === profile.id ? profile : p)), activeProfileId);
-  }, [profiles, activeProfileId, persistProfiles]);
-
-  const deleteProfileAction = useCallback(async (id: string) => {
-    const next = profiles.filter((p) => p.id !== id);
-    persistProfiles(next, activeProfileId === id ? null : activeProfileId);
-  }, [profiles, activeProfileId, persistProfiles]);
-
-  const switchProfile = useCallback(() => {
-    setManageMode(false);
-    setView("profiles");
-  }, []);
-
-  const goToLogin = useCallback(() => setView("login"), []);
-  const backToProfiles = useCallback(() => setView("profiles"), []);
-
   const value = useMemo<AppStore>(() => ({
-    view,
-    profiles,
-    activeProfile,
-    avatarImages,
-    manageMode,
-    setManageMode,
-    selectProfile,
-    createProfile,
-    updateProfile: updateProfileAction,
-    deleteProfile: deleteProfileAction,
-    switchProfile,
-    goToLogin,
-    backToProfiles,
     section,
     setSection,
     categories,
@@ -578,9 +397,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     settings,
     setSettings,
     updateSettings,
-    auth,
-    traktConnected,
-    deviceCode,
     busy,
     toast,
     setToast,
@@ -593,19 +409,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     closePlayer,
     installAddon,
     removeAddon,
-    setAddonsState,
-    signIn,
-    signOut,
-    beginTrakt,
-    pollTrakt,
-    disconnectTrakt
+    setAddonsState
   }), [
-    view, profiles, activeProfile, avatarImages, manageMode,
-    selectProfile, createProfile, updateProfileAction, deleteProfileAction, switchProfile, goToLogin, backToProfiles,
     section, categories, catalogConfigs, loadCatalogRow, homeServerRows, continueWatching, watchlist, hero, heroPreview, selected, streams, selectedEpisode, loadEpisodeStreams, advanceEpisode, activeStream, activeChannel,
-    addons, iptvSnapshot, query, results, settings, auth, traktConnected, deviceCode, busy, toast,
+    addons, iptvSnapshot, query, results, settings, busy, toast,
     updateSettings, refreshData, openDetails, closeDetails, playStream, playTrailer, playChannel, closePlayer,
-    installAddon, removeAddon, setAddonsState, signIn, signOut, beginTrakt, pollTrakt, disconnectTrakt
+    installAddon, removeAddon, setAddonsState
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

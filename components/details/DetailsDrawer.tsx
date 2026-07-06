@@ -1,13 +1,11 @@
 "use client";
 
-import { BadgeCheck, Bookmark, Clapperboard, Play, Star, Trash2, UserCircle, X } from "lucide-react";
+import { Play, Star, UserCircle, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { config } from "@/lib/config";
-import { saveProgress } from "@/lib/cloud";
-import { authClient, traktClient, useApp } from "@/lib/store";
+import { useApp } from "@/lib/store";
 import { getReviews, getSeasonEpisodes } from "@/lib/tmdb";
 import { MediaCard } from "@/components/media/MediaCard";
-import type { EpisodeInfo, MediaItem, ReviewInfo, StreamSource } from "@/lib/types";
+import type { EpisodeInfo, MediaItem, ReviewInfo } from "@/lib/types";
 
 export function DetailsDrawer() {
   const { selected: item } = useApp();
@@ -27,45 +25,30 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
 
   const playableCount = streams.filter((stream) => Boolean(stream.url)).length;
   const isTv = item.mediaType === "tv";
-  const sourceLabel = selectedEpisode ? `Sources · S${selectedEpisode.season} E${selectedEpisode.episode}` : "Sources";
+  const sourceLabel = selectedEpisode ? `Fontes · T${selectedEpisode.season} E${selectedEpisode.episode}` : "Fontes";
 
   return (
     <aside className="details-drawer">
-      <button className="close" onClick={closeDetails} aria-label="Close"><X size={22} /></button>
+      <button className="close" onClick={closeDetails} aria-label="Fechar"><X size={22} /></button>
       <div className="detail-backdrop" style={{ backgroundImage: item.backdrop ? `url(${item.backdrop})` : undefined }} />
       <div className="detail-body">
-        <p className="eyebrow">{isTv ? "Series" : "Movie"} {item.rating ? `• ⭐ ${item.rating}` : ""}</p>
+        <p className="eyebrow">{isTv ? "Série" : "Filme"} {item.rating ? `• ⭐ ${item.rating}` : ""}</p>
         <h2>{item.title}</h2>
-        <p>{item.overview || "No overview available."}</p>
+        <p>{item.overview || "Sem descrição disponível."}</p>
         <div className="chips">
           {item.year && <span>{item.year}</span>}
           {item.duration && <span>{item.duration}</span>}
-          {streams.length > 0 && <span>{playableCount}/{streams.length} web playable</span>}
+          {streams.length > 0 && <span>{playableCount}/{streams.length} tocáveis</span>}
         </div>
         <div className="detail-actions">
           <button className="primary" onClick={() => streams[0] && playStream(streams[0])} disabled={!streams.length}>
-            <Play size={18} fill="currentColor" /> Play best
+            <Play size={18} fill="currentColor" /> Tocar melhor fonte
           </button>
-          <button className="secondary text-button" onClick={() => traktClient.addToWatchlist({ mediaType: item.mediaType, tmdbId: item.id }).catch(() => undefined)}><Bookmark size={18} /> Watchlist</button>
-          <button className="secondary text-button" onClick={() => traktClient.removeFromWatchlist({ mediaType: item.mediaType, tmdbId: item.id }).catch(() => undefined)}><Trash2 size={18} /> Remove</button>
-          <button className="secondary text-button" onClick={() => {
-            void saveProgress(authClient, {
-              media_type: item.mediaType,
-              show_tmdb_id: item.id,
-              title: item.title,
-              progress: 1,
-              duration_seconds: 1,
-              position_seconds: 1,
-              backdrop_path: item.backdrop?.replace(config.backdropBase, "") ?? null,
-              poster_path: item.image?.replace(config.imageBase, "") ?? null
-            }).catch(() => undefined);
-            void traktClient.scrobble("stop", { mediaType: item.mediaType, tmdbId: item.id, progress: 100 }).catch(() => undefined);
-          }}><BadgeCheck size={18} /> Watched</button>
         </div>
 
         {item.trailerUrl && (
           <button className="trailer-link" onClick={() => void playTrailer(item)}>
-            <Play size={18} fill="currentColor" /> Watch trailer
+            <Play size={18} fill="currentColor" /> Assistir trailer
           </button>
         )}
 
@@ -78,13 +61,13 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
             <h3>{sourceLabel}</h3>
             <div className="source-list">
               {streams.length === 0 && (
-                <p className="empty">{isTv && !selectedEpisode ? "Pick an episode to find sources." : "No web-playable sources found from installed addons yet."}</p>
+                <p className="empty">{isTv && !selectedEpisode ? "Escolha um episódio para listar fontes." : "Nenhuma fonte disponível no momento."}</p>
               )}
               {streams.map((stream, index) => (
                 <button key={`${stream.addonId}-${index}`} className={`source-row ${stream.url ? "" : "is-locked"}`} onClick={() => playStream(stream)}>
                   <div>
                     <strong>{stream.source}</strong>
-                    <span>{stream.addonName} {stream.description ? `• ${stream.description}` : ""} {stream.url ? "" : "• not web-playable"}</span>
+                    <span>{stream.addonName} {stream.description ? `• ${stream.description}` : ""} {stream.url ? "" : "• não tocável"}</span>
                   </div>
                   <span className="quality">{stream.quality || "HD"}</span>
                 </button>
@@ -95,13 +78,13 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
 
         {item.cast?.length ? (
           <section className="detail-section">
-            <h3>Cast</h3>
+            <h3>Elenco</h3>
             <div className="mini-strip">
               {item.cast.map((person) => (
                 <article className="mini-card person" key={person.id}>
                   {person.image ? <img src={person.image} alt="" /> : <UserCircle size={30} />}
                   <strong>{person.name}</strong>
-                  <span>{person.character || "Cast"}</span>
+                  <span>{person.character || "Elenco"}</span>
                 </article>
               ))}
             </div>
@@ -110,7 +93,7 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
 
         {reviews.length > 0 && (
           <section className="detail-section">
-            <h3>Reviews</h3>
+            <h3>Avaliações</h3>
             <div className="review-list">
               {reviews.map((review) => (
                 <article className="review-card" key={review.id}>
@@ -128,7 +111,7 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
 
         {item.related?.length ? (
           <section className="detail-section related">
-            <h3>More Like This</h3>
+            <h3>Veja também</h3>
             <div className="rail-strip compact">
               {item.related.map((related) => <MediaCard key={`related-${related.mediaType}-${related.id}`} item={related} onOpen={openDetails} />)}
             </div>
@@ -184,7 +167,7 @@ function SeasonEpisodes({ item, selectedEpisode, onPlayEpisode }: {
               onClick={() => onPlayEpisode(season, episode.episodeNumber)}
             >
               <div className="episode-still">
-                {episode.still ? <img src={episode.still} alt="" /> : <Clapperboard size={24} />}
+                {episode.still ? <img src={episode.still} alt="" /> : <Play size={24} />}
                 <span className="episode-play"><Play size={18} fill="currentColor" /></span>
               </div>
               <div className="episode-info">

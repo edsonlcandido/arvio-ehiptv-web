@@ -1,40 +1,35 @@
 "use client";
 
 import {
-  Captions, Cloud, Eye, EyeOff, Languages, LayoutGrid, ListVideo, LogOut,
-  Network, Play, Plus, RefreshCw, RotateCcw, Server, Sparkles, Subtitles, Trash2, Tv, User, UserCircle
+  Captions, Eye, EyeOff, KeyRound, Languages, LayoutGrid, ListVideo,
+  Network, Play, Plus, RotateCcw, Server, Subtitles, Trash2, Tv
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { defaultCatalogs, mergeCatalogs } from "@/lib/catalogs";
-import { hasSupabaseConfig, hasTraktConfig } from "@/lib/config";
-import { defaultSettings, useApp } from "@/lib/store";
-import type { AppSettings, CatalogConfig, HomeServerConfig } from "@/lib/types";
-
-const settingsKey = "arvio.web.settings";
+import { useApp } from "@/lib/store";
+import type { AppSettings, CatalogConfig, HomeServerConfig, StreamServiceConfig } from "@/lib/types";
 
 const SECTIONS = [
-  { id: "accounts", label: "Accounts", icon: Cloud },
-  { id: "profiles", label: "Profiles", icon: User },
-  { id: "playback", label: "Playback", icon: Play },
-  { id: "language", label: "Language & Audio", icon: Languages },
-  { id: "subtitles", label: "Subtitles", icon: Subtitles },
-  { id: "ai", label: "AI Subtitles", icon: Captions },
-  { id: "appearance", label: "Appearance", icon: LayoutGrid },
-  { id: "network", label: "Network", icon: Network },
+  { id: "vod", label: "Conta Eh!IPTV", icon: KeyRound },
+  { id: "playback", label: "Reprodução", icon: Play },
+  { id: "language", label: "Idioma e Áudio", icon: Languages },
+  { id: "subtitles", label: "Legendas", icon: Subtitles },
+  { id: "ai", label: "Legendas IA", icon: Captions },
+  { id: "appearance", label: "Aparência", icon: LayoutGrid },
+  { id: "network", label: "Rede", icon: Network },
   { id: "tv", label: "TV (IPTV)", icon: Tv },
-  { id: "homeserver", label: "Home Server", icon: Server },
-  { id: "catalogs", label: "Catalogs", icon: ListVideo },
-  { id: "addons", label: "Addons", icon: Sparkles }
+  { id: "homeserver", label: "Servidor Local", icon: Server },
+  { id: "catalogs", label: "Catálogos", icon: ListVideo }
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
 
 export function SettingsScreen() {
-  const [section, setSection] = useState<SectionId>("accounts");
+  const [section, setSection] = useState<SectionId>("vod");
   return (
     <div className="settings-shell">
       <aside className="settings-sidebar">
-        <h2>Settings</h2>
+        <h2>Configurações</h2>
         {SECTIONS.map((s) => {
           const Icon = s.icon;
           return (
@@ -82,112 +77,103 @@ function SectionBody({ section }: { section: SectionId }) {
   const set = (patch: Partial<AppSettings>) => app.updateSettings(patch);
 
   switch (section) {
-    case "accounts":
-      return <AccountsSection />;
-    case "profiles":
-      return (
-        <Panel title="Profiles">
-          <Row label="Skip profile selection on launch"><Toggle value={settings.skipProfileSelection} onChange={(v) => set({ skipProfileSelection: v })} /></Row>
-          <button className="secondary text-button" onClick={app.switchProfile}><User size={18} /> Manage profiles</button>
-        </Panel>
-      );
     case "playback":
       return (
-        <Panel title="Playback">
-          <Row label="Auto play next episode"><Toggle value={settings.autoPlayNext} onChange={(v) => set({ autoPlayNext: v })} /></Row>
-          <Row label="Auto play single source"><Toggle value={settings.autoPlaySingleSource} onChange={(v) => set({ autoPlaySingleSource: v })} /></Row>
-          <Row label="Auto play minimum quality">
+        <Panel title="Reprodução">
+          <Row label="Reproduzir próximo episódio automaticamente"><Toggle value={settings.autoPlayNext} onChange={(v) => set({ autoPlayNext: v })} /></Row>
+          <Row label="Reproduzir quando houver uma única fonte"><Toggle value={settings.autoPlaySingleSource} onChange={(v) => set({ autoPlaySingleSource: v })} /></Row>
+          <Row label="Tocar automaticamente a partir de">
             <Select value={settings.autoPlayMinQuality} onChange={(v) => set({ autoPlayMinQuality: v })}
-              options={[["any", "Any"], ["hd", "HD"], ["fhd", "FHD"], ["4k", "4K"]]} />
+              options={[["any", "Qualquer"], ["hd", "HD"], ["fhd", "Full HD"], ["4k", "4K"]]} />
           </Row>
-          <Row label="Trailer auto play"><Toggle value={settings.trailerAutoPlay} onChange={(v) => set({ trailerAutoPlay: v })} /></Row>
-          <Row label="Trailer sound"><Toggle value={settings.trailerSound} onChange={(v) => set({ trailerSound: v })} /></Row>
-          <Row label="Trailer delay (seconds)"><input type="number" min={0} max={10} value={settings.trailerDelaySeconds} onChange={(e) => set({ trailerDelaySeconds: Number(e.target.value) })} /></Row>
-          <Row label="Frame rate matching" hint="Android only"><Toggle value={false} disabled onChange={() => undefined} /></Row>
-          <Row label="Volume boost" hint="Android only"><Toggle value={false} disabled onChange={() => undefined} /></Row>
+          <Row label="Trailer automático"><Toggle value={settings.trailerAutoPlay} onChange={(v) => set({ trailerAutoPlay: v })} /></Row>
+          <Row label="Som do trailer"><Toggle value={settings.trailerSound} onChange={(v) => set({ trailerSound: v })} /></Row>
+          <Row label="Atraso do trailer (segundos)"><input type="number" min={0} max={10} value={settings.trailerDelaySeconds} onChange={(e) => set({ trailerDelaySeconds: Number(e.target.value) })} /></Row>
+          <Row label="Sincronizar taxa de quadros" hint="Apenas Android"><Toggle value={false} disabled onChange={() => undefined} /></Row>
+          <Row label="Reforço de volume" hint="Apenas Android"><Toggle value={false} disabled onChange={() => undefined} /></Row>
         </Panel>
       );
     case "language":
       return (
-        <Panel title="Language & Audio">
-          <Row label="Content language" hint="TMDB code, e.g. en-US"><input value={settings.language} onChange={(e) => set({ language: e.target.value })} /></Row>
-          <Row label="Primary subtitle language"><input value={settings.defaultSubtitle} onChange={(e) => set({ defaultSubtitle: e.target.value })} /></Row>
-          <Row label="Secondary subtitle language"><input value={settings.secondarySubtitle} onChange={(e) => set({ secondarySubtitle: e.target.value })} /></Row>
-          <Row label="Audio language"><input value={settings.audioLanguage} onChange={(e) => set({ audioLanguage: e.target.value })} /></Row>
+        <Panel title="Idioma e Áudio">
+          <Row label="Idioma do conteúdo" hint="Código TMDB, ex.: pt-BR"><input value={settings.language} onChange={(e) => set({ language: e.target.value })} /></Row>
+          <Row label="Idioma principal da legenda"><input value={settings.defaultSubtitle} onChange={(e) => set({ defaultSubtitle: e.target.value })} /></Row>
+          <Row label="Idioma secundário da legenda"><input value={settings.secondarySubtitle} onChange={(e) => set({ secondarySubtitle: e.target.value })} /></Row>
+          <Row label="Idioma do áudio"><input value={settings.audioLanguage} onChange={(e) => set({ audioLanguage: e.target.value })} /></Row>
         </Panel>
       );
     case "subtitles":
       return (
-        <Panel title="Subtitles">
-          <Row label="Subtitle size (%)"><input type="number" min={60} max={200} value={settings.subtitleSize} onChange={(e) => set({ subtitleSize: Number(e.target.value) })} /></Row>
-          <Row label="Subtitle color"><input type="color" value={settings.subtitleColor} onChange={(e) => set({ subtitleColor: e.target.value })} /></Row>
-          <Row label="Subtitle offset (ms)"><input type="number" value={settings.subtitleOffsetMs} onChange={(e) => set({ subtitleOffsetMs: Number(e.target.value) })} /></Row>
-          <Row label="Subtitle style">
+        <Panel title="Legendas">
+          <Row label="Tamanho da legenda (%)"><input type="number" min={60} max={200} value={settings.subtitleSize} onChange={(e) => set({ subtitleSize: Number(e.target.value) })} /></Row>
+          <Row label="Cor da legenda"><input type="color" value={settings.subtitleColor} onChange={(e) => set({ subtitleColor: e.target.value })} /></Row>
+          <Row label="Deslocamento da legenda (ms)"><input type="number" value={settings.subtitleOffsetMs} onChange={(e) => set({ subtitleOffsetMs: Number(e.target.value) })} /></Row>
+          <Row label="Estilo da legenda">
             <Select value={settings.subtitleStyle} onChange={(v) => set({ subtitleStyle: v })}
-              options={[["outline", "Outline"], ["shadow", "Drop shadow"], ["background", "Background"], ["raised", "Raised"]]} />
+              options={[["outline", "Contorno"], ["shadow", "Sombra"], ["background", "Fundo"], ["raised", "Em relevo"]]} />
           </Row>
-          <Row label="Stylized subtitles"><Toggle value={settings.subtitleStylized} onChange={(v) => set({ subtitleStylized: v })} /></Row>
-          <Row label="Filter subtitles by language"><Toggle value={settings.filterSubtitlesByLanguage} onChange={(v) => set({ filterSubtitlesByLanguage: v })} /></Row>
-          <Row label="Remove hearing-impaired [SDH] tags"><Toggle value={settings.removeHearingImpaired} onChange={(v) => set({ removeHearingImpaired: v })} /></Row>
+          <Row label="Legendas estilizadas"><Toggle value={settings.subtitleStylized} onChange={(v) => set({ subtitleStylized: v })} /></Row>
+          <Row label="Filtrar legendas por idioma"><Toggle value={settings.filterSubtitlesByLanguage} onChange={(v) => set({ filterSubtitlesByLanguage: v })} /></Row>
+          <Row label="Remover marcações para deficientes auditivos [SDH]"><Toggle value={settings.removeHearingImpaired} onChange={(v) => set({ removeHearingImpaired: v })} /></Row>
         </Panel>
       );
     case "ai":
       return (
-        <Panel title="AI Subtitles">
-          <Row label="AI subtitle enhancement"><Toggle value={settings.aiSubtitlesEnabled} onChange={(v) => set({ aiSubtitlesEnabled: v })} /></Row>
-          <Row label="AI model">
+        <Panel title="Legendas com IA">
+          <Row label="Aprimorar legendas com IA"><Toggle value={settings.aiSubtitlesEnabled} onChange={(v) => set({ aiSubtitlesEnabled: v })} /></Row>
+          <Row label="Modelo de IA">
             <Select value={settings.aiSubtitleModel} onChange={(v) => set({ aiSubtitleModel: v })}
-              options={[["off", "Off"], ["groq", "Groq"], ["gemini", "Gemini"]]} />
+              options={[["off", "Desligado"], ["groq", "Groq"], ["gemini", "Gemini"]]} />
           </Row>
-          <Row label="Auto-select best match"><Toggle value={settings.aiAutoSelect} onChange={(v) => set({ aiAutoSelect: v })} /></Row>
-          <Row label="AI API key"><input type="password" value={settings.aiApiKey} onChange={(e) => set({ aiApiKey: e.target.value })} placeholder="••••••••" /></Row>
+          <Row label="Selecionar a melhor legenda automaticamente"><Toggle value={settings.aiAutoSelect} onChange={(v) => set({ aiAutoSelect: v })} /></Row>
+          <Row label="Chave de API da IA"><input type="password" value={settings.aiApiKey} onChange={(e) => set({ aiApiKey: e.target.value })} placeholder="••••••••" /></Row>
         </Panel>
       );
     case "appearance":
       return (
-        <Panel title="Appearance">
-          <Row label="Card layout">
-            <Select value={settings.cardLayoutMode} onChange={(v) => set({ cardLayoutMode: v })} options={[["landscape", "Landscape"], ["poster", "Poster"]]} />
+        <Panel title="Aparência">
+          <Row label="Layout dos cards">
+            <Select value={settings.cardLayoutMode} onChange={(v) => set({ cardLayoutMode: v })} options={[["landscape", "Paisagem"], ["poster", "Poster"]]} />
           </Row>
-          <Row label="Device mode">
-            <Select value={settings.deviceModeOverride} onChange={(v) => set({ deviceModeOverride: v })} options={[["auto", "Auto"], ["tv", "TV"], ["desktop", "Desktop"]]} />
+          <Row label="Modo do dispositivo">
+            <Select value={settings.deviceModeOverride} onChange={(v) => set({ deviceModeOverride: v })} options={[["auto", "Automático"], ["tv", "TV"], ["desktop", "Desktop"]]} />
           </Row>
-          <Row label="OLED black background"><Toggle value={settings.oledBlack} onChange={(v) => set({ oledBlack: v })} /></Row>
-          <Row label="Clock format">
-            <Select value={settings.clockFormat} onChange={(v) => set({ clockFormat: v })} options={[["24h", "24-hour"], ["12h", "12-hour"]]} />
+          <Row label="Fundo preto OLED"><Toggle value={settings.oledBlack} onChange={(v) => set({ oledBlack: v })} /></Row>
+          <Row label="Formato do relógio">
+            <Select value={settings.clockFormat} onChange={(v) => set({ clockFormat: v })} options={[["24h", "24 horas"], ["12h", "12 horas"]]} />
           </Row>
-          <Row label="Show budget / revenue"><Toggle value={settings.showBudget} onChange={(v) => set({ showBudget: v })} /></Row>
-          <Row label="Smooth scrolling"><Toggle value={settings.smoothScrolling} onChange={(v) => set({ smoothScrolling: v })} /></Row>
-          <Row label="Spoiler blur"><Toggle value={settings.spoilerBlur} onChange={(v) => set({ spoilerBlur: v })} /></Row>
-          <Row label="Accent theme">
+          <Row label="Mostrar orçamento / receita"><Toggle value={settings.showBudget} onChange={(v) => set({ showBudget: v })} /></Row>
+          <Row label="Rolagem suave"><Toggle value={settings.smoothScrolling} onChange={(v) => set({ smoothScrolling: v })} /></Row>
+          <Row label="Desfoque de spoiler"><Toggle value={settings.spoilerBlur} onChange={(v) => set({ spoilerBlur: v })} /></Row>
+          <Row label="Cor de destaque">
             <Select value={settings.accentColor} onChange={(v) => set({ accentColor: v })}
-              options={[["arctic", "Arctic"], ["gold", "Gold"], ["green", "Green"], ["blue", "Blue"], ["purple", "Purple"]]} />
+              options={[["arctic", "Ártico"], ["gold", "Dourado"], ["green", "Verde"], ["blue", "Azul"], ["purple", "Roxo"]]} />
           </Row>
         </Panel>
       );
     case "network":
       return (
-        <Panel title="Network">
-          <Row label="DNS provider">
+        <Panel title="Rede">
+          <Row label="Provedor de DNS">
             <Select value={settings.dnsProvider} onChange={(v) => set({ dnsProvider: v })}
-              options={[["system", "System"], ["cloudflare", "Cloudflare"], ["google", "Google"], ["quad9", "Quad9"]]} />
+              options={[["system", "Sistema"], ["cloudflare", "Cloudflare"], ["google", "Google"], ["quad9", "Quad9"]]} />
           </Row>
-          <Row label="Show loading statistics"><Toggle value={settings.showLoadingStats} onChange={(v) => set({ showLoadingStats: v })} /></Row>
-          <Row label="Custom user agent" hint="Android only"><input value={settings.customUserAgent} disabled placeholder="Browser-controlled" /></Row>
+          <Row label="Mostrar estatísticas de carregamento"><Toggle value={settings.showLoadingStats} onChange={(v) => set({ showLoadingStats: v })} /></Row>
+          <Row label="User agent personalizado" hint="Apenas Android"><input value={settings.customUserAgent} disabled placeholder="Controlado pelo navegador" /></Row>
         </Panel>
       );
     case "tv":
       return (
         <Panel title="TV (IPTV)">
-          <p className="empty">{settings.iptvPlaylists.length} playlist(s) configured. Add and manage playlists, EPG and favorites on the TV page.</p>
+          <p className="empty">{settings.iptvPlaylists.length} playlist(s) configurada(s). Adicione e gerencie listas, EPG e favoritos na página de TV.</p>
         </Panel>
       );
+    case "vod":
+      return <VodSection />;
     case "homeserver":
       return <HomeServerSection />;
     case "catalogs":
       return <CatalogsSection />;
-    case "addons":
-      return <AddonsSection />;
     default:
       return null;
   }
@@ -199,61 +185,6 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
       <h2>{title}</h2>
       {children}
     </section>
-  );
-}
-
-/* ---------- Accounts ---------- */
-
-function AccountsSection() {
-  const { auth, traktConnected, deviceCode, signIn, signOut, beginTrakt, pollTrakt, disconnectTrakt, refreshData } = useApp();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
-  return (
-    <>
-      <Panel title="ARVIO Account">
-        {!hasSupabaseConfig() && <p className="empty">Supabase env is missing. Add values in web/.env.local.</p>}
-        {auth ? (
-          <div className="account-row">
-            <UserCircle size={34} />
-            <div><strong>{auth.email}</strong><span>{auth.userId}</span></div>
-            <button className="secondary" onClick={signOut}><LogOut size={18} /> Sign out</button>
-          </div>
-        ) : (
-          <div className="login-form">
-            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
-            <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" />
-            <div className="hero-actions">
-              <button className="primary" onClick={() => signIn(email, password, "sign-in")}>Sign in</button>
-              <button className="secondary" onClick={() => signIn(email, password, "sign-up")}>Create</button>
-            </div>
-          </div>
-        )}
-      </Panel>
-
-      <Panel title="Trakt">
-        {!hasTraktConfig() && <p className="empty">Trakt client id is missing.</p>}
-        {traktConnected ? (
-          <button className="secondary" onClick={disconnectTrakt}>Disconnect Trakt</button>
-        ) : (
-          <>
-            <button className="primary" onClick={beginTrakt}>Start device link</button>
-            {deviceCode && (
-              <div className="device-code">
-                <span>{deviceCode.user_code}</span>
-                <p>Open {deviceCode.verification_url}</p>
-                <button className="secondary" onClick={pollTrakt}>I approved it</button>
-              </div>
-            )}
-          </>
-        )}
-      </Panel>
-
-      <Panel title="Sync & Updates">
-        <button className="secondary text-button" onClick={() => void refreshData()}><RefreshCw size={18} /> Force cloud sync now</button>
-        <p className="empty">Telegram bot setup is available on Android. The web app auto-updates on each deploy.</p>
-      </Panel>
-    </>
   );
 }
 
@@ -272,24 +203,24 @@ function HomeServerSection() {
   const update = (next: HomeServerConfig[]) => updateSettings({ homeServers: next });
 
   return (
-    <Panel title="Home Server">
-      <p className="empty">Connect Jellyfin / Emby with an API token, or a username + password. Movies play directly in the browser. (Plex accepted; browse coming soon.)</p>
+    <Panel title="Servidor Local">
+      <p className="empty">Conecte um servidor Jellyfin, Emby ou Plex usando um token de API ou usuário + senha. Os filmes tocam diretamente no navegador.</p>
       <div className="inline-form">
         <select value={type} onChange={(e) => setType(e.target.value as HomeServerConfig["type"])}>
           <option value="jellyfin">Jellyfin</option>
           <option value="emby">Emby</option>
           <option value="plex">Plex</option>
         </select>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://server:8096" />
-        <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="API token (optional)" />
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username (optional)" />
-        <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" />
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://servidor:8096" />
+        <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="Token de API (opcional)" />
+        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Usuário (opcional)" />
+        <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha" type="password" />
         <button className="primary" onClick={() => {
           if (!url.trim()) return;
           update([{ id: crypto.randomUUID(), type, name: name || type, url: url.trim(), token: token.trim(), username: username.trim() || undefined, password: password || undefined, enabled: true }, ...servers]);
           setName(""); setUrl(""); setToken(""); setUsername(""); setPassword("");
-        }}><Plus size={18} /> Add</button>
+        }}><Plus size={18} /> Adicionar</button>
       </div>
       <div className="settings-list">
         {servers.map((server) => (
@@ -303,8 +234,68 @@ function HomeServerSection() {
             <button className="icon-button danger" onClick={() => update(servers.filter((s) => s.id !== server.id))}><Trash2 size={18} /></button>
           </div>
         ))}
-        {servers.length === 0 && <p className="empty">No home servers configured.</p>}
+        {servers.length === 0 && <p className="empty">Nenhum servidor local configurado.</p>}
       </div>
+    </Panel>
+  );
+}
+
+/* ---------- Conta Eh!IPTV ---------- */
+
+const EH_IPTV_BASE_URL = "http://dnstv.top/";
+
+function VodSection() {
+  const { settings, updateSettings } = useApp();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  const services = settings.streamServices ?? [];
+  const update = (next: StreamServiceConfig[]) => updateSettings({ streamServices: next });
+
+  const addService = () => {
+    if (!username.trim() || !password) return;
+    update([
+      {
+        id: crypto.randomUUID(),
+        name: "Eh!IPTV",
+        baseUrl: EH_IPTV_BASE_URL,
+        username: username.trim(),
+        password,
+        contentType: "both",
+        enabled: true
+      },
+      ...services
+    ]);
+    setUsername("");
+    setPassword("");
+  };
+
+  return (
+    <Panel title="Conta Eh!IPTV">
+      <p className="empty">
+        Credenciais da sua conta <strong>Eh!IPTV</strong>.
+      </p>
+      <div className="inline-form">
+        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Usuário" />
+        <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha" type="password" />
+        <button className="primary" onClick={addService}><Plus size={18} /> Adicionar</button>
+      </div>
+      <div className="settings-list">
+        {services.map((service) => (
+          <div className="settings-list-row" key={service.id}>
+            <button className="icon-button" onClick={() => update(services.map((s) => s.id === service.id ? { ...s, enabled: !s.enabled } : s))}>
+              {service.enabled ? <Eye size={18} /> : <EyeOff size={18} />}
+            </button>
+            <strong>{service.name}</strong>
+            <span>{service.username}</span>
+            <button className="icon-button danger" onClick={() => update(services.filter((s) => s.id !== service.id))}><Trash2 size={18} /></button>
+          </div>
+        ))}
+        {services.length === 0 && <p className="empty">Nenhuma conta Eh!IPTV vinculada. Adicione suas credenciais acima.</p>}
+      </div>
+      <p className="empty" style={{ marginTop: 12 }}>
+        As credenciais ficam salvas no <code>localStorage</code> deste navegador.
+      </p>
     </Panel>
   );
 }
@@ -331,15 +322,15 @@ function CatalogsSection() {
   };
 
   return (
-    <Panel title="Catalogs (Home Rows)">
+    <Panel title="Catálogos (carrosséis da Home)">
       <div className="inline-form">
-        <input value={customCatalogUrl} onChange={(e) => setCustomCatalogUrl(e.target.value)} placeholder="https://mdblist.com/lists/user/list" />
+        <input value={customCatalogUrl} onChange={(e) => setCustomCatalogUrl(e.target.value)} placeholder="https://mdblist.com/lists/usuario/lista" />
         <button className="primary" onClick={() => {
           if (!customCatalogUrl.trim()) return;
-          updateCatalogs([{ id: `custom_${crypto.randomUUID()}`, name: "Custom MDBList", sourceType: "mdblist", mediaType: "all", sourceUrl: customCatalogUrl.trim(), enabled: true }, ...catalogs]);
+          updateCatalogs([{ id: `custom_${crypto.randomUUID()}`, name: "MDBList personalizado", sourceType: "mdblist", mediaType: "all", sourceUrl: customCatalogUrl.trim(), enabled: true }, ...catalogs]);
           setCustomCatalogUrl("");
-        }}><Plus size={18} /> Add</button>
-        <button className="secondary text-button" onClick={() => updateCatalogs(defaultCatalogs)}><RotateCcw size={18} /> Reset</button>
+        }}><Plus size={18} /> Adicionar</button>
+        <button className="secondary text-button" onClick={() => updateCatalogs(defaultCatalogs)}><RotateCcw size={18} /> Restaurar padrão</button>
       </div>
       <div className="settings-list">
         {catalogs.map((catalog) => (
@@ -355,38 +346,6 @@ function CatalogsSection() {
           </div>
         ))}
       </div>
-    </Panel>
-  );
-}
-
-/* ---------- Addons ---------- */
-
-function AddonsSection() {
-  const { addons, installAddon, setAddonsState } = useApp();
-  const [addonUrl, setAddonUrl] = useState("");
-  return (
-    <Panel title="Stremio Addons">
-      <div className="inline-form">
-        <input value={addonUrl} onChange={(e) => setAddonUrl(e.target.value)} placeholder="https://addon.example.com/manifest.json" />
-        <button className="primary" onClick={async () => { if (!addonUrl.trim()) return; await installAddon(addonUrl); setAddonUrl(""); }}><Plus size={18} /> Install</button>
-      </div>
-      <div className="settings-list">
-        {addons.map((addon) => (
-          <div className="settings-list-row" key={addon.id}>
-            <button className="icon-button" onClick={() => setAddonsState(addons.map((a) => a.id === addon.id ? { ...a, enabled: a.enabled === false } : a))}>
-              {addon.enabled === false ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-            <strong>{addon.name}</strong>
-            <span>{addon.resources.join(", ") || "manifest"}</span>
-            <span>{addon.catalogs.length} catalogs</span>
-          </div>
-        ))}
-        {addons.length === 0 && <p className="empty">Install Stremio-compatible addons by URL above.</p>}
-      </div>
-      <button className="secondary text-button danger" style={{ marginTop: 16 }} onClick={() => {
-        localStorage.removeItem(settingsKey);
-        window.location.reload();
-      }}><Trash2 size={18} /> Reset all web settings</button>
     </Panel>
   );
 }

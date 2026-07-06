@@ -16,7 +16,6 @@ export interface MediaItem {
   backdrop?: string | null;
   progress?: number;
   isWatched?: boolean;
-  traktId?: number | null;
   badge?: string | null;
   genreIds?: number[];
   nextEpisode?: NextEpisode | null;
@@ -87,7 +86,6 @@ export type CatalogSourceType =
   | "preinstalled"
   | "tmdb"
   | "mdblist"
-  | "trakt"
   | "addon"
   | "home-server"
   | "template";
@@ -163,65 +161,6 @@ export interface AddonCatalog {
   extra?: Array<{ name: string; isRequired?: boolean; options?: string[] }>;
 }
 
-export interface AuthSession {
-  accessToken: string;
-  refreshToken: string;
-  userId: string;
-  email: string;
-  expiresAt: number;
-}
-
-/**
- * Mirrors the Android `Profile` data model (com.arflix.tv.data.model.Profile).
- * Serialized identically inside account_sync_state.payload.profiles, so the web
- * reads/writes the same profiles the Android app created.
- */
-export interface Profile {
-  id: string;
-  name: string;
-  avatarColor: number;        // ARGB long, e.g. 0xFFE50914
-  avatarId: number;           // 0 = legacy letter+color, 1-84 = fluent emoji avatar
-  avatarImageVersion?: number; // 0 = no custom uploaded photo
-  avatarImageStoragePath?: string | null;
-  isKidsProfile?: boolean;
-  pin?: string | null;
-  isLocked?: boolean;
-  createdAt?: number;
-  lastUsedAt?: number;
-}
-
-export interface UserProfile {
-  id: string;
-  email?: string | null;
-  addons?: string | null;
-  default_subtitle?: string | null;
-  auto_play_next?: boolean | null;
-}
-
-export interface WatchHistoryEntry {
-  id?: string | null;
-  user_id: string;
-  profile_id?: string | null;
-  media_type: MediaType;
-  show_tmdb_id: number;
-  show_trakt_id?: number | null;
-  season?: number | null;
-  episode?: number | null;
-  title?: string | null;
-  episode_title?: string | null;
-  progress: number;
-  duration_seconds: number;
-  position_seconds: number;
-  paused_at?: string | null;
-  updated_at?: string | null;
-  source?: string | null;
-  backdrop_path?: string | null;
-  poster_path?: string | null;
-  stream_key?: string | null;
-  stream_addon_id?: string | null;
-  stream_title?: string | null;
-}
-
 export interface IptvPlaylistEntry {
   id: string;
   name: string;
@@ -295,6 +234,38 @@ export interface HomeServerConfig {
   enabled: boolean;
 }
 
+/**
+ * Configuration for an on-demand IPTV / VOD stream service. Movies and series
+ * resolve to direct-stream URLs that follow a `base/type/user/pass/id.ext`
+ * pattern (e.g. `http://dnstv.top/movie/john/abc123/408996.mp4`). The exact
+ * ID is typically provided by a per-title catalog endpoint (e.g. a
+ * PocketBase-style records collection filtered by tmdb_id / imdb_id).
+ */
+export interface StreamServiceConfig {
+  id: string;
+  name: string;
+  /** Base URL of the stream tree, e.g. `http://dnstv.top/movie`. Trailing slashes are stripped. */
+  baseUrl: string;
+  username: string;
+  password: string;
+  /**
+   * Path segment(s) the provider expects between the base URL and the
+   * username. `movie` resolves to `<base>/<user>/<pass>/<id>.mp4`,
+   * `series` resolves to `<base>/<user>/<pass>/<id>.<ext>`, `both` keeps
+   * the layout flexible (the catalog caller decides the path).
+   */
+  contentType: "movie" | "series" | "both";
+  /** File extension used by the provider for movie / series streams (defaults to "mp4"). */
+  extension?: string;
+  /**
+   * Optional lookup endpoint that maps an external id (tmdb/imdb) to the
+   * provider's internal stream id. PocketBase-style filters are supported
+   * in the form `?filter=(tmdb_id=254474)`.
+   */
+  lookupUrl?: string;
+  enabled: boolean;
+}
+
 export interface AppSettings {
   // Playback
   autoPlayNext: boolean;
@@ -334,8 +305,6 @@ export interface AppSettings {
   dnsProvider: "system" | "cloudflare" | "google" | "quad9";
   showLoadingStats: boolean;
   customUserAgent: string;
-  // Profiles
-  skipProfileSelection: boolean;
   cardDensity: "comfortable" | "compact";
   // Catalogs / addons
   catalogs: CatalogConfig[];
@@ -343,6 +312,8 @@ export interface AppSettings {
   disabledAddonIds: string[];
   // Home servers
   homeServers: HomeServerConfig[];
+  // VOD / on-demand IPTV stream services (movies + series)
+  streamServices: StreamServiceConfig[];
   // IPTV
   iptvPlaylists: IptvPlaylistEntry[];
   favoriteChannelIds: string[];
