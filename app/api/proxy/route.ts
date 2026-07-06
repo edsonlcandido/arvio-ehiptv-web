@@ -205,7 +205,7 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
 }
 
-async function fetchWithTimeout(input: string, init: RequestInit): Promise<Response> {
+async function fetchWithTimeout(input: string | URL, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_HEADER_TIMEOUT_MS);
   try {
