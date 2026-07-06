@@ -28,6 +28,25 @@ const REQUEST_TIMEOUT_MS = 3000;
 const BATCH_SIZE = 60;
 const PER_PAGE = 200;
 
+/**
+ * Playback URL builders follow the standard Xtream Codes URL scheme:
+ *   http(s)://<base>/movie/<user>/<pass>/<stream_id>.<ext>
+ *   http(s)://<base>/series/<user>/<pass>/<series_id>/<season>/<episode>.<ext>
+ *
+ * The `stream_id` / `series_id` are stored in each PocketBase row next to
+ * `tmdb_id`. The names below match the Xtream convention — if the admin
+ * picked different field names in PocketBase, edit the constants.
+ *
+ * A single TMDB title can map to multiple catalogue rows in PocketBase
+ * (e.g. "Michael" vs "Michael [L]"); the operator-supplied labels live in
+ * `vod_title` / `serie_title` and are surfaced as separate Play buttons.
+ */
+const MOVIE_ID_FIELD = "stream_id";
+const SERIES_ID_FIELD = "series_id";
+const VOD_TITLE_FIELD = "vod_title";
+const SERIES_TITLE_FIELD = "serie_title";
+const FILE_EXTENSION = "mp4";
+
 type Kind = Exclude<MediaType, "all">;
 
 const availabilityCache = new Map<string, Set<number>>();
@@ -146,3 +165,104 @@ export const __ehiptvConfig = {
 export function applyEhIptvFilter(items: MediaItem[]): Promise<MediaItem[]> {
   return filterByEhIptv(items);
 }
+
+/* ============================================================
+   Playback URL assembly
+   ============================================================ */
+
+export type StreamKind = Kind;
+
+export interface StreamOption {
+  /** Internal id used in the playback URL (PocketBase `stream_id` / `series_id`). */
+  id: string | number;
+  /** Operator-defined label for this catalogue edition (`vod_title` / `serie_title`). */
+  title: string;
+}
+
+export interface PlaybackService {
+  baseUrl: string;
+  username: string;
+  password: string;
+}
+
+/**
+ * Look up all PocketBase rows that own this TMDB id and return the Eh!IPTV
+ * options the customer can pick between. A single film can show up multiple
+ * times in the operator's catalogue (e.g. "Michael" vs "Michael [L]"); the
+ * drawer turns each option into its own Play button.
+ *
+ * Returns an empty array when the collection is unreachable or no row
+ * matches — callers are expected to fail-open or toast appropriately.
+ */
+export async function fetchStreamOptions(item: { id: number; mediaType: MediaType }): Promise<StreamOption[]> {
+  const kind: Kind = item.mediaType === "tv" ? "tv" : "movie";
+  const collection = collectionFor(kind);
+  const idField = kind === "movie" ? MOVIE_ID_FIELD : SERIES_ID_FIELD;
+  const titleField = kind === "movie" ? VOD_TITLE_FIELD : SERIES_TITLE_FIELD;
+
+  const url = new URL(`/api/collections/${collection}/records`, EH_IPTV_BASE_URL);
+  url.searchParams.set("filter", `(${TMDB_FIELD}=${item.id})`);
+  url.searchParams.set("fields", `${idField},${titleField}`);
+  url.searchParams.set("perPage", "200");
+
+  try {
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      headers: { Accept: "application/json" }
+    });
+    if (!response.ok) return [];
+    const payload = await response.json();
+    const rows = Array.isArray(payload?.items) ? payload.items : [];
+    return rows
+      .map((row: Record<string, unknown>) => {
+        const id = row[idField];
+        const title = String(row[titleField] ?? "").trim();
+        return { id, title };
+      })
+      .filter((option: StreamOption) => option.id !== null && option.id !== "" && option.id !== undefined);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build the Xtream Codes playback URL for a single movie or one episode of a
+ * series. Throws when the option is missing its id or when a series request
+ * lands without season/episode context.
+ */
+export function buildPlaybackUrl(
+  service: PlaybackService,
+  option: StreamOption,
+  kind: Kind,
+  episode?: { season: number; episode: number }
+): string {
+  const base = service.baseUrl.replace(/\/+$/, "");
+  if (!base) throw new Error("Eh!IPTV: baseUrl is required");
+  if (!service.username) throw new Error("Eh!IPTV: username is required");
+  if (!service.password) throw new Error("Eh!IPTV: password is required");
+
+  const user = encodeURIComponent(service.username);
+  const pass = encodeURIComponent(service.password);
+
+  if (kind === "movie") {
+    if (option.id == null || option.id === "") {
+      throw new Error("Eh!IPTV: sem stream_id para este título");
+    }
+    return `${base}/movie/${user}/${pass}/${option.id}.${FILE_EXTENSION}`;
+  }
+
+  if (!episode) throw new Error("Eh!IPTV: episódio obrigatório para séries");
+  if (option.id == null || option.id === "") {
+    throw new Error("Eh!IPTV: sem series_id para este título");
+  }
+  return `${base}/series/${user}/${pass}/${option.id}/${episode.season}/${episode.episode}.${FILE_EXTENSION}`;
+}
+
+/** Dev / diagnostics handle — re-exports the field/collection names so support tooling can echo them. */
+export const __ehiptvPlayConfig = {
+  movieIdField: MOVIE_ID_FIELD,
+  seriesIdField: SERIES_ID_FIELD,
+  vodTitleField: VOD_TITLE_FIELD,
+  seriesTitleField: SERIES_TITLE_FIELD,
+  fileExtension: FILE_EXTENSION
+} as const;

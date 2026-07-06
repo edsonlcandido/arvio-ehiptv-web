@@ -6,6 +6,7 @@ import { useApp } from "@/lib/store";
 import { getReviews, getSeasonEpisodes } from "@/lib/tmdb";
 import { MediaCard } from "@/components/media/MediaCard";
 import type { EpisodeInfo, MediaItem, ReviewInfo } from "@/lib/types";
+import type { StreamOption } from "@/lib/ehiptv";
 
 export function DetailsDrawer() {
   const { selected: item } = useApp();
@@ -14,8 +15,19 @@ export function DetailsDrawer() {
 }
 
 function DetailsDrawerView({ item }: { item: MediaItem }) {
-  const { streams, selectedEpisode, loadEpisodeStreams, closeDetails, openDetails, playStream, playTrailer } = useApp();
+  const {
+    streams,
+    selectedEpisode,
+    loadEpisodeStreams,
+    loadStreamOptions,
+    closeDetails,
+    openDetails,
+    playEhIptv,
+    playStream,
+    playTrailer
+  } = useApp();
   const [reviews, setReviews] = useState<ReviewInfo[]>([]);
+  const [streamOptions, setStreamOptions] = useState<StreamOption[] | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -23,9 +35,33 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
     return () => { active = false; };
   }, [item.id, item.mediaType]);
 
-  const playableCount = streams.filter((stream) => Boolean(stream.url)).length;
+  // Fetch the Eh!IPTV catalogue rows for this title. One row → a single
+  // "Tocar" button; multiple rows (e.g. "Michael" and "Michael [L]") →
+  // one Play button per option labelled with `vod_title` / `serie_title`.
+  useEffect(() => {
+    setStreamOptions(null);
+    if (item.isHomeServer) return;
+    let active = true;
+    void loadStreamOptions(item).then((options) => {
+      if (active) setStreamOptions(options);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [item.id, item.mediaType, item.isHomeServer, loadStreamOptions]);
+
   const isTv = item.mediaType === "tv";
-  const sourceLabel = selectedEpisode ? `Fontes · T${selectedEpisode.season} E${selectedEpisode.episode}` : "Fontes";
+  // Home-server items play their pre-resolved stream; everything else goes
+  // through the Eh!IPTV URL builder — one Play per catalogue edition.
+  const playOption = (option: StreamOption) => {
+    void playEhIptv(item, selectedEpisode ?? undefined, option);
+  };
+  const ready = item.isHomeServer
+    ? Boolean(streams[0])
+    : isTv
+      ? Boolean(selectedEpisode) && (streamOptions?.length ?? 0) > 0
+      : (streamOptions?.length ?? 0) > 0;
+  const loading = !item.isHomeServer && streamOptions === null && !isTv
+    ? true
+    : !item.isHomeServer && streamOptions === null && isTv && Boolean(selectedEpisode);
 
   return (
     <aside className="details-drawer">
@@ -38,13 +74,48 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
         <div className="chips">
           {item.year && <span>{item.year}</span>}
           {item.duration && <span>{item.duration}</span>}
-          {streams.length > 0 && <span>{playableCount}/{streams.length} tocáveis</span>}
+          {selectedEpisode && <span>T{selectedEpisode.season} · E{selectedEpisode.episode}</span>}
         </div>
-        <div className="detail-actions">
-          <button className="primary" onClick={() => streams[0] && playStream(streams[0])} disabled={!streams.length}>
-            <Play size={18} fill="currentColor" /> Tocar melhor fonte
-          </button>
-        </div>
+
+        {item.isHomeServer ? (
+          <div className="detail-actions">
+            <button className="primary" onClick={() => streams[0] && playStream(streams[0])} disabled={!streams.length}>
+              <Play size={18} fill="currentColor" /> Tocar
+            </button>
+          </div>
+        ) : (
+          <div className="detail-actions">
+            {streamOptions === null && (
+              <button className="primary" disabled>
+                <Play size={18} fill="currentColor" /> {loading ? "Carregando…" : "Tocar"}
+              </button>
+            )}
+            {streamOptions !== null && streamOptions.length === 0 && (
+              <button className="primary" disabled>
+                <Play size={18} fill="currentColor" /> Indisponível
+              </button>
+            )}
+            {streamOptions !== null && streamOptions.length === 1 && (
+              <button className="primary" disabled={!ready} onClick={() => playOption(streamOptions[0])}>
+                <Play size={18} fill="currentColor" /> Tocar
+              </button>
+            )}
+            {streamOptions !== null && streamOptions.length > 1 && (
+              <div className="option-buttons">
+                {streamOptions.map((option, index) => (
+                  <button
+                    key={`${option.id}-${index}`}
+                    className="primary option-button"
+                    disabled={!ready}
+                    onClick={() => playOption(option)}
+                  >
+                    <Play size={18} fill="currentColor" /> Tocar {option.title || `opção ${index + 1}`}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {item.trailerUrl && (
           <button className="trailer-link" onClick={() => void playTrailer(item)}>
@@ -55,26 +126,6 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
         {isTv && item.seasons?.length ? (
           <SeasonEpisodes item={item} selectedEpisode={selectedEpisode} onPlayEpisode={(s, e) => loadEpisodeStreams(item, s, e)} />
         ) : null}
-
-        {(!isTv || selectedEpisode || streams.length > 0) && (
-          <section className="detail-section">
-            <h3>{sourceLabel}</h3>
-            <div className="source-list">
-              {streams.length === 0 && (
-                <p className="empty">{isTv && !selectedEpisode ? "Escolha um episódio para listar fontes." : "Nenhuma fonte disponível no momento."}</p>
-              )}
-              {streams.map((stream, index) => (
-                <button key={`${stream.addonId}-${index}`} className={`source-row ${stream.url ? "" : "is-locked"}`} onClick={() => playStream(stream)}>
-                  <div>
-                    <strong>{stream.source}</strong>
-                    <span>{stream.addonName} {stream.description ? `• ${stream.description}` : ""} {stream.url ? "" : "• não tocável"}</span>
-                  </div>
-                  <span className="quality">{stream.quality || "HD"}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
 
         {item.cast?.length ? (
           <section className="detail-section">

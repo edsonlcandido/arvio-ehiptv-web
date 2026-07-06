@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { getStreams, installAddon as installAddonManifest, loadLocalAddons, saveLocalAddons } from "./addons";
 import { defaultCatalogs, mergeCatalogs } from "./catalogs";
+import { buildPlaybackUrl, fetchStreamOptions, type StreamOption } from "./ehiptv";
 import { loadHomeServerRows } from "./homeserver";
 import { loadIptvSnapshot, loadPlaylists, savePlaylists } from "./iptv";
 import { loadStored, saveStored } from "./storage";
@@ -118,6 +119,12 @@ export interface AppStore {
   playStream: (stream: StreamSource) => void;
   playTrailer: (item: MediaItem) => Promise<void>;
   playChannel: (channel: IptvChannel) => void;
+  playEhIptv: (
+    item: MediaItem,
+    episode: { season: number; episode: number } | undefined,
+    option: StreamOption
+  ) => Promise<void>;
+  loadStreamOptions: (item: MediaItem) => Promise<StreamOption[]>;
   closePlayer: () => void;
   installAddon: (url: string) => Promise<void>;
   removeAddon: (addon: InstalledAddon) => Promise<void>;
@@ -345,6 +352,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const playEhIptv = useCallback(async (
+    item: MediaItem,
+    episode: { season: number; episode: number } | undefined,
+    option: StreamOption
+  ) => {
+    const service = (settings.streamServices ?? []).find(
+      (candidate) => candidate.enabled && candidate.username && candidate.password && candidate.baseUrl
+    );
+    if (!service) {
+      setToast("Adicione suas credenciais em Configurações → Conta Eh!IPTV");
+      return;
+    }
+
+    const kind: "movie" | "tv" = item.mediaType === "tv" ? "tv" : "movie";
+    if (kind === "tv" && !episode) {
+      setToast("Selecione um episódio para reproduzir");
+      return;
+    }
+
+    setBusy("Preparando");
+    let url: string;
+    try {
+      url = buildPlaybackUrl(service, option, kind, episode);
+    } catch (error) {
+      setBusy("");
+      setToast(error instanceof Error ? error.message : "Não foi possível preparar a reprodução");
+      return;
+    }
+
+    setActiveChannel(null);
+    setActiveStream({
+      source: item.title,
+      addonName: "Eh!IPTV",
+      quality: "Direct",
+      size: "",
+      url: proxiedUrl(url),
+      description: kind === "movie"
+        ? (option.title || "Filme")
+        : `${option.title || "S"} · T${episode!.season}/E${episode!.episode}`
+    });
+    setBusy("");
+  }, [settings.streamServices]);
+
+  /** Prefetch the PocketBase options for an item — exposed so the Drawer can
+   * render one Play button per edition when the operator catalogues the same
+   * TMDB title in multiple rows (e.g. "Michael" vs "Michael [L]"). */
+  const loadStreamOptions = useCallback(async (item: MediaItem): Promise<StreamOption[]> => {
+    return fetchStreamOptions(item).catch(() => []);
+  }, []);
+
   const closePlayer = useCallback(() => {
     setActiveStream(null);
     setActiveChannel(null);
@@ -406,6 +463,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     playStream,
     playTrailer,
     playChannel,
+    playEhIptv,
+    loadStreamOptions,
     closePlayer,
     installAddon,
     removeAddon,
@@ -413,7 +472,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }), [
     section, categories, catalogConfigs, loadCatalogRow, homeServerRows, continueWatching, watchlist, hero, heroPreview, selected, streams, selectedEpisode, loadEpisodeStreams, advanceEpisode, activeStream, activeChannel,
     addons, iptvSnapshot, query, results, settings, busy, toast,
-    updateSettings, refreshData, openDetails, closeDetails, playStream, playTrailer, playChannel, closePlayer,
+    updateSettings, refreshData, openDetails, closeDetails, playStream, playTrailer, playChannel, playEhIptv, loadStreamOptions, closePlayer,
     installAddon, removeAddon, setAddonsState
   ]);
 
