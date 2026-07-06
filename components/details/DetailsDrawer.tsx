@@ -24,7 +24,8 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
     openDetails,
     playEhIptv,
     playStream,
-    playTrailer
+    playTrailer,
+    settings
   } = useApp();
   const [reviews, setReviews] = useState<ReviewInfo[]>([]);
   const [streamOptions, setStreamOptions] = useState<StreamOption[] | null>(null);
