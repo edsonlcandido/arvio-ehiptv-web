@@ -1867,6 +1867,21 @@ input:focus {
 
 html.is-tv {
   scroll-behavior: smooth !important;
+  /* System overlays on some TVs (Tizen status bar, webOS launcher peek)
+     eat into the safe area. Respect them so the sidebar / hero don't end
+     up under a system-drawn bar. */
+  padding-top: env(safe-area-inset-top, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+/* Hide the virtual cursor that the D-Pad displays on TV — the focus ring
+   is the only "pointer" the user needs to see. Disabled only when TV mode
+   is active, so desktop / mobile keep their normal cursor. */
+html.is-tv,
+html.is-tv * {
+  cursor: none !important;
 }
 
 /* Universal focus ring — overrides the more subtle per-element rings so the
