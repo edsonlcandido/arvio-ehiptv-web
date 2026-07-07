@@ -280,7 +280,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     setBusy("Opening details");
     setStreams([]);
-    const detailed = await getDetails(item).catch(() => item);
+    const detailed = await getDetails(item, settings.language).catch(() => item);
     setSelected(detailed);
     // Movies fetch sources immediately; TV waits for an episode selection.
     if (item.mediaType === "movie") {
@@ -329,7 +329,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const playTrailer = useCallback(async (item: MediaItem) => {
     let url = item.trailerUrl ?? null;
     if (!url) {
-      const detailed = await getDetails(item).catch(() => item);
+      const detailed = await getDetails(item, settings.language).catch(() => item);
       url = detailed.trailerUrl ?? null;
       setSelected((current) => current ?? detailed);
     }

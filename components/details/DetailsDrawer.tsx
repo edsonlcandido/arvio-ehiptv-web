@@ -31,7 +31,7 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
 
   useEffect(() => {
     let active = true;
-    void getReviews(item).then((r) => active && setReviews(r)).catch(() => undefined);
+    void getReviews(item, settings.language).then((r) => active && setReviews(r)).catch(() => undefined);
     return () => { active = false; };
   }, [item.id, item.mediaType]);
 
@@ -205,6 +205,7 @@ function SeasonEpisodes({ item, selectedEpisode, onPlayEpisode, seriesId, servic
   service: Pick<PlaybackService, "baseUrl" | "username" | "password"> | null;
 }) {
   const seasons = item.seasons ?? [];
+  const { settings } = useApp();
   const [season, setSeason] = useState(seasons[0]?.seasonNumber ?? 1);
   const [episodes, setEpisodes] = useState<EpisodeInfo[]>([]);
   const [available, setAvailable] = useState<Set<number> | null>(null);
@@ -215,7 +216,7 @@ function SeasonEpisodes({ item, selectedEpisode, onPlayEpisode, seriesId, servic
     setLoading(true);
     setAvailable(null);
 
-    void getSeasonEpisodes(item.id, season)
+    void getSeasonEpisodes(item.id, season, settings.language)
       .then(async (eps) => {
         if (!active) return;
         setEpisodes(eps);

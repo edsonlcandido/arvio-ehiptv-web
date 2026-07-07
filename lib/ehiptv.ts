@@ -248,11 +248,20 @@ const SERIES_EPISODE_CACHE_MS = 5 * 60 * 1000;
 
 type EpisodeRow = {
   id: string;
-  season?: number;
-  episode_num?: number;
+  season?: number | string;
+  episode_num?: number | string;
   container_extension?: string;
   title?: string;
 };
+
+function toEpisodeNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
 type SeriesInfo = {
   episodes?: Record<string, EpisodeRow[]>;
   info?: Record<string, unknown>;
@@ -306,8 +315,9 @@ async function fetchSeriesInfo(
       const seasonNum = Number(seasonKey);
       for (const row of rows) {
         if (!row?.id) continue;
-        const epNum = row.episode_num ?? (typeof row.season === "number" ? row.season : undefined);
-        // Skip if we can't derive an episode number to index the cache by.
+        // Xtream providers return `episode_num` as a string ("1"), some as number —
+        // normalise before keying the cache so resolution is consistent.
+        const epNum = toEpisodeNumber(row.episode_num) ?? toEpisodeNumber(row.season);
         if (epNum == null) continue;
         const episodeCacheKey = `${cacheKey}|${seasonNum}|${epNum}`;
         seriesEpisodeCache.set(episodeCacheKey, {
@@ -340,10 +350,8 @@ export async function fetchAvailableEpisodeNumbers(
     if (!Array.isArray(block)) return new Set<number>();
     const out = new Set<number>();
     for (const row of block) {
-      const num = row?.episode_num ?? row?.season;
-      if (typeof num === "number" && Number.isFinite(num)) out.add(num);
-      // Some providers use 1-based count; if `title` exists, fall back to
-      // the array index + 1 as a last resort for matching against TMDB rows.
+      const num = toEpisodeNumber(row?.episode_num) ?? toEpisodeNumber(row?.season);
+      if (num != null) out.add(num);
     }
     return out;
   } catch {
@@ -365,7 +373,7 @@ export async function fetchEpisodeExtension(
   try {
     const data = await fetchSeriesInfo(service, seriesId);
     const block = (data?.episodes?.[String(seasonNumber)] ?? data?.episodes?.[seasonNumber] ?? []) as EpisodeRow[];
-    const match = block.find((row) => row?.episode_num === episodeNumber);
+    const match = block.find((row) => toEpisodeNumber(row?.episode_num) === episodeNumber);
     return match?.container_extension || FILE_EXTENSION;
   } catch {
     return null;
@@ -387,10 +395,8 @@ async function resolveSeriesEpisodeId(
 
   // Cache miss — fetch the full series info (and pre-populate the cache).
   const data = await fetchSeriesInfo(service, seriesId);
-  const seasonBlock = data?.episodes?.[String(season)] ?? [];
-  const match =
-    seasonBlock.find((ep) => ep.episode_num === episode) ??
-    seasonBlock.find((ep) => Number(ep.season) === season && Number(ep.episode_num) === episode);
+  const seasonBlock = (data?.episodes?.[String(season)] ?? []) as EpisodeRow[];
+  const match = seasonBlock.find((ep) => toEpisodeNumber(ep.episode_num) === episode);
   if (!match?.id) {
     throw new Error(`Eh!IPTV: episódio S${season}E${episode} não encontrado para series_id=${seriesId}`);
   }

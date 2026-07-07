@@ -3,6 +3,7 @@
 import { Check, Clapperboard } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getLogoUrl } from "@/lib/tmdb";
+import { useApp } from "@/lib/store";
 import type { MediaItem } from "@/lib/types";
 
 export function MediaCard({ item, onOpen, onFocus, posterMode = false }: {
@@ -11,6 +12,7 @@ export function MediaCard({ item, onOpen, onFocus, posterMode = false }: {
   onFocus?: (item: MediaItem) => void;
   posterMode?: boolean;
 }) {
+  const { settings } = useApp();
   const [logo, setLogo] = useState<string | null>(null);
   const progress = item.progress ?? 0;
   const showProgress = !item.isWatched && progress >= 1 && progress <= 94;
@@ -21,11 +23,11 @@ export function MediaCard({ item, onOpen, onFocus, posterMode = false }: {
   useEffect(() => {
     if (item.id <= 0 || item.isHomeServer) return undefined;
     let active = true;
-    void getLogoUrl({ mediaType: item.mediaType, id: item.id }).then((url) => {
+    void getLogoUrl({ mediaType: item.mediaType, id: item.id }, settings.language).then((url) => {
       if (active) setLogo(url);
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [item.id, item.mediaType]);
+  }, [item.id, item.mediaType, settings.language]);
 
   return (
     <button
