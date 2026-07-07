@@ -29,11 +29,11 @@ export function HomeScreen() {
     setHeroLogo(null);
     if (!hero || hero.id <= 0) return;
     let active = true;
-    void getLogoUrl({ mediaType: hero.mediaType, id: hero.id }).then((url) => {
+    void getLogoUrl({ mediaType: hero.mediaType, id: hero.id }, settings.language).then((url) => {
       if (active) setHeroLogo(url);
     }).catch(() => undefined);
     return () => { active = false; };
-  }, [hero?.id, hero?.mediaType]);
+  }, [hero?.id, hero?.mediaType, settings.language]);
 
   const onCardFocus = (item: MediaItem) => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);

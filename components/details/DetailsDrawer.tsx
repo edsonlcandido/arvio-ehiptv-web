@@ -1,12 +1,12 @@
 "use client";
 
 import { Play, Star, UserCircle, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/lib/store";
 import { getReviews, getSeasonEpisodes } from "@/lib/tmdb";
+import { fetchAvailableEpisodeNumbers, type PlaybackService, type StreamOption } from "@/lib/ehiptv";
 import { MediaCard } from "@/components/media/MediaCard";
 import type { EpisodeInfo, MediaItem, ReviewInfo } from "@/lib/types";
-import type { StreamOption } from "@/lib/ehiptv";
 
 export function DetailsDrawer() {
   const { selected: item } = useApp();
@@ -18,20 +18,20 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
   const {
     streams,
     selectedEpisode,
-    loadEpisodeStreams,
-    loadStreamOptions,
     closeDetails,
     openDetails,
     playEhIptv,
     playStream,
-    playTrailer
+    playTrailer,
+    settings,
+    loadStreamOptions
   } = useApp();
   const [reviews, setReviews] = useState<ReviewInfo[]>([]);
   const [streamOptions, setStreamOptions] = useState<StreamOption[] | null>(null);
 
   useEffect(() => {
     let active = true;
-    void getReviews(item).then((r) => active && setReviews(r)).catch(() => undefined);
+    void getReviews(item, settings.language).then((r) => active && setReviews(r)).catch(() => undefined);
     return () => { active = false; };
   }, [item.id, item.mediaType]);
 
@@ -47,6 +47,22 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
     }).catch(() => undefined);
     return () => { active = false; };
   }, [item.id, item.mediaType, item.isHomeServer, loadStreamOptions]);
+
+  /**
+   * Play a single episode of a series via the Eh!IPTV catalogue.
+   *
+   * The previous implementation wired SeasonEpisodes' click to
+   * `loadEpisodeStreams`, which is the legacy addon-resolution flow (Stremio
+   * manifests). When click came from a catalogue row, no addon would match
+   * the episode and nothing was played. This handler skips addons entirely
+   * and delegates to playEhIptv (which calls buildPlaybackUrl → resolve
+   * episode.id via get_series_info → setActiveStream with a proxied URL).
+   */
+  const playSeriesEpisode = useCallback(async (season: number, episode: number) => {
+    const option = streamOptions?.[0];
+    if (!option) return;
+    await playEhIptv(item, { season, episode }, option);
+  }, [streamOptions, item, playEhIptv]);
 
   const isTv = item.mediaType === "tv";
   // Home-server items play their pre-resolved stream; everything else goes
@@ -124,7 +140,15 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
         )}
 
         {isTv && item.seasons?.length ? (
-          <SeasonEpisodes item={item} selectedEpisode={selectedEpisode} onPlayEpisode={(s, e) => loadEpisodeStreams(item, s, e)} />
+          <SeasonEpisodes
+            item={item}
+            selectedEpisode={selectedEpisode}
+            onPlayEpisode={playSeriesEpisode}
+            seriesId={streamOptions?.[0]?.id != null ? String(streamOptions[0].id) : null}
+            service={(settings.streamServices ?? []).find(
+              (candidate) => candidate.enabled && candidate.username && candidate.password && candidate.baseUrl
+            ) ?? null}
+          />
         ) : null}
 
         {item.cast?.length ? (
@@ -173,25 +197,45 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
   );
 }
 
-function SeasonEpisodes({ item, selectedEpisode, onPlayEpisode }: {
+function SeasonEpisodes({ item, selectedEpisode, onPlayEpisode, seriesId, service }: {
   item: MediaItem;
   selectedEpisode: { season: number; episode: number } | null;
   onPlayEpisode: (season: number, episode: number) => void;
+  seriesId: string | null;
+  service: Pick<PlaybackService, "baseUrl" | "username" | "password"> | null;
 }) {
   const seasons = item.seasons ?? [];
+  const { settings } = useApp();
   const [season, setSeason] = useState(seasons[0]?.seasonNumber ?? 1);
   const [episodes, setEpisodes] = useState<EpisodeInfo[]>([]);
+  const [available, setAvailable] = useState<Set<number> | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    void getSeasonEpisodes(item.id, season)
-      .then((eps) => { if (active) setEpisodes(eps); })
+    setAvailable(null);
+
+    void getSeasonEpisodes(item.id, season, settings.language)
+      .then(async (eps) => {
+        if (!active) return;
+        setEpisodes(eps);
+        // Cross-reference against the operator's actual catalogue.
+        if (service && seriesId) {
+          const fetched = await fetchAvailableEpisodeNumbers(service, seriesId, season).catch(() => null);
+          if (active) setAvailable(fetched);
+        } else {
+          // No operator context yet — treat every TMDB episode as available.
+          // When the user clicks Play, the resolve step will fail visibly
+          // if the operator has nothing for this series.
+          if (active) setAvailable(new Set(eps.map((e) => e.episodeNumber)));
+        }
+      })
       .catch(() => undefined)
       .finally(() => active && setLoading(false));
+
     return () => { active = false; };
-  }, [item.id, season]);
+  }, [item.id, season, seriesId, service]);
 
   return (
     <section className="detail-section">
@@ -210,12 +254,17 @@ function SeasonEpisodes({ item, selectedEpisode, onPlayEpisode }: {
       <div className="episode-list">
         {loading && <p className="empty">Loading episodes…</p>}
         {!loading && episodes.map((episode) => {
+          const isPlayable = available === null
+            ? true // null = fail-open: показуем всё
+            : available.has(episode.episodeNumber);
           const active = selectedEpisode?.season === season && selectedEpisode?.episode === episode.episodeNumber;
           return (
             <button
               key={episode.id}
-              className={`episode-row ${active ? "is-active" : ""}`}
-              onClick={() => onPlayEpisode(season, episode.episodeNumber)}
+              className={`episode-row ${active ? "is-active" : ""} ${isPlayable ? "" : "is-unavailable"}`}
+              onClick={() => isPlayable && onPlayEpisode(season, episode.episodeNumber)}
+              disabled={!isPlayable}
+              title={isPlayable ? undefined : "Este episódio não está disponível no seu plano"}
             >
               <div className="episode-still">
                 {episode.still ? <img src={episode.still} alt="" /> : <Play size={24} />}
@@ -223,12 +272,18 @@ function SeasonEpisodes({ item, selectedEpisode, onPlayEpisode }: {
               </div>
               <div className="episode-info">
                 <strong>{episode.episodeNumber}. {episode.name}</strong>
-                <span>{episode.airDate || ""}{episode.runtime ? ` • ${episode.runtime}m` : ""}</span>
+                <span>
+                  {episode.airDate || ""}{episode.runtime ? ` • ${episode.runtime}m` : ""}
+                  {!isPlayable && <em className="episode-tag"> • Indisponível</em>}
+                </span>
                 <p>{episode.overview || ""}</p>
               </div>
             </button>
           );
         })}
+        {!loading && available !== null && episodes.length > 0 && [...available].length === 0 && (
+          <p className="empty">Nenhum episódio desta temporada está disponível no seu plano.</p>
+        )}
       </div>
     </section>
   );

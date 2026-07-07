@@ -221,14 +221,15 @@ function persistLogoCache() {
 }
 
 /** Title-treatment (clearlogo) URL for a movie/show — mirrors MediaRepository.getImages logo pick. */
-export async function getLogoUrl(item: { mediaType: MediaType; id: number }): Promise<string | null> {
+export async function getLogoUrl(item: { mediaType: MediaType; id: number }, language = "en-US"): Promise<string | null> {
   const key = `${item.mediaType}:${item.id}`;
   restoreLogoCache();
   if (logoCache.has(key)) return logoCache.get(key) ?? null;
   try {
-    const images = await tmdb<TmdbImages>(`${item.mediaType}/${item.id}/images`, { include_image_language: "en,null" });
+    const images = await tmdb<TmdbImages>(`${item.mediaType}/${item.id}/images`, { include_image_language: `${language},en,null` });
     const logos = images.logos ?? [];
     const pick =
+      logos.filter((l) => l.iso_639_1 === language).sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))[0] ??
       logos.filter((l) => l.iso_639_1 === "en").sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))[0] ??
       logos.find((l) => l.iso_639_1 === null) ??
       logos[0];
@@ -278,10 +279,11 @@ export async function getSeasonEpisodes(tvId: number, seasonNumber: number, lang
   }
 }
 
-export async function getReviews(item: { mediaType: MediaType; id: number }): Promise<ReviewInfo[]> {
+export async function getReviews(item: { mediaType: MediaType; id: number }, language = "en-US"): Promise<ReviewInfo[]> {
   try {
     const response = await tmdb<{ results?: Array<{ id: string; author?: string; content?: string; created_at?: string; author_details?: { rating?: number | null; avatar_path?: string | null } }> }>(
-      `${item.mediaType}/${item.id}/reviews`
+      `${item.mediaType}/${item.id}/reviews`,
+      { language }
     );
     return (response.results ?? []).slice(0, 12).map((review) => ({
       id: review.id,
@@ -317,10 +319,10 @@ export async function getBasicItem(mediaType: MediaType, id: number, language = 
   }
 }
 
-export async function getDetails(item: MediaItem) {
+export async function getDetails(item: MediaItem, language = "en-US") {
   try {
     const details = await tmdb<TmdbItem>(`${item.mediaType}/${item.id}`, {
-      language: "en-US",
+      language,
       append_to_response: "credits,videos,similar,recommendations"
     });
     const mapped = mapTmdbItem({ ...details, media_type: item.mediaType }, item.mediaType);

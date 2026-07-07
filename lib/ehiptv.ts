@@ -1,3 +1,4 @@
+import { jsonRequest, proxiedUrl } from "./http";
 import type { MediaItem, MediaType } from "./types";
 
 /**
@@ -226,16 +227,205 @@ export async function fetchStreamOptions(item: { id: number; mediaType: MediaTyp
 }
 
 /**
- * Build the Xtream Codes playback URL for a single movie or one episode of a
- * series. Throws when the option is missing its id or when a series request
- * lands without season/episode context.
+ * Resolve the Xtream Codes episode id (`episodes[season][i].id`) for a given
+ * (seriesId, season, episode) tuple.
+ *
+ * The Xtream playback URL for a series episode is built from the EPISODE
+ * id returned by `get_series_info`, NOT from `(series_id, season, episode)`.
+ * The misleading `/series/{user}/{pass}/{series_id}/{season}/{episode}.mp4`
+ * form relies on a backend shortcut most providers don't implement; the
+ * safe path is to look up the real episode id first.
+ *
+ * Calls go through `/api/xtream` so HTTPS pages can reach HTTP Xtream
+ * servers (the dnstv.top use-case) without mixed-content errors.
+ *
+ * Results are cached in-memory for 5 minutes to avoid re-fetching when the
+ * user opens the same episode twice in a row.
  */
-export function buildPlaybackUrl(
+const seriesEpisodeCache = new Map<string, { episodeId: string; extension: string; expiresAt: number }>();
+const seriesInfoCache = new Map<string, { expiresAt: number; data: SeriesInfo }>();
+const SERIES_EPISODE_CACHE_MS = 5 * 60 * 1000;
+
+type EpisodeRow = {
+  id: string;
+  season?: number | string;
+  episode_num?: number | string;
+  container_extension?: string;
+  title?: string;
+};
+
+function toEpisodeNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+type SeriesInfo = {
+  episodes?: Record<string, EpisodeRow[]>;
+  info?: Record<string, unknown>;
+};
+
+/**
+ * Fetch (and cache) the full `get_series_info` payload for a given series.
+ * Use this when you need to enumerate which episodes exist on the provider
+ * (for filtering the UI list). For a single playback lookup use
+ * `resolveSeriesEpisodeId`, which reuses this cache.
+ */
+async function fetchSeriesInfo(
+  service: PlaybackService,
+  seriesId: string | number
+): Promise<SeriesInfo> {
+  const cacheKey = `${service.baseUrl}|${service.username}|${seriesId}`;
+  const cached = seriesInfoCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  // Build the Xtream URL the same way the operator-side helper does it
+  // (matches the shape that every Xtream provider implements):
+  //
+  //   ${PROVIDER_BASE}/player_api.php
+  //     ?username=${user}
+  //     &password=${pass}
+  //     &action=get_series_info
+  //     &series_id=${seriesId}
+  //
+  // We forward the whole URL through /api/xtream so mixed content
+  // (HTTPS page → HTTP dnstv.top) is resolved server-side. No xtream_*
+  // prefix gymnastics — the proxy just relays the URL we give it.
+  const base = service.baseUrl.replace(/\/+$/, "");
+  const upstream = new URL(`${base}/player_api.php`);
+  upstream.searchParams.set("username", service.username);
+  upstream.searchParams.set("password", service.password);
+  upstream.searchParams.set("action", "get_series_info");
+  upstream.searchParams.set("series_id", String(seriesId));
+
+  const proxyUrl = new URL("/api/xtream", window.location.origin);
+  proxyUrl.searchParams.set("url", upstream.toString());
+
+  const data = await jsonRequest<SeriesInfo>(proxyUrl.toString());
+  seriesInfoCache.set(cacheKey, { data, expiresAt: now + SERIES_EPISODE_CACHE_MS });
+
+  // Pre-populate the per-episode cache from the same response so that the
+  // eventual `resolveSeriesEpisodeId` call is a cache hit.
+  if (data?.episodes) {
+    for (const [seasonKey, rows] of Object.entries(data.episodes)) {
+      if (!Array.isArray(rows)) continue;
+      const seasonNum = Number(seasonKey);
+      for (const row of rows) {
+        if (!row?.id) continue;
+        // Xtream providers return `episode_num` as a string ("1"), some as number —
+        // normalise before keying the cache so resolution is consistent.
+        const epNum = toEpisodeNumber(row.episode_num) ?? toEpisodeNumber(row.season);
+        if (epNum == null) continue;
+        const episodeCacheKey = `${cacheKey}|${seasonNum}|${epNum}`;
+        seriesEpisodeCache.set(episodeCacheKey, {
+          episodeId: String(row.id),
+          extension: row.container_extension || FILE_EXTENSION,
+          expiresAt: now + SERIES_EPISODE_CACHE_MS
+        });
+      }
+    }
+  }
+  return data;
+}
+
+/**
+ * Returns the set of episode numbers that the operator actually has for
+ * a given (series, season). Used by the UI to filter the TMDB-derived
+ * episode list down to the ones that will actually play.
+ *
+ * Returns `null` on lookup failure (fail-open — treats the season as fully
+ * available) to match `fetchAvailableIds` semantics.
+ */
+export async function fetchAvailableEpisodeNumbers(
+  service: PlaybackService,
+  seriesId: string | number,
+  seasonNumber: number
+): Promise<Set<number> | null> {
+  try {
+    const data = await fetchSeriesInfo(service, seriesId);
+    const block = data?.episodes?.[String(seasonNumber)] ?? data?.episodes?.[seasonNumber] ?? [];
+    if (!Array.isArray(block)) return new Set<number>();
+    const out = new Set<number>();
+    for (const row of block) {
+      const num = toEpisodeNumber(row?.episode_num) ?? toEpisodeNumber(row?.season);
+      if (num != null) out.add(num);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the extension hint advertised by the provider for a single
+ * episode, falling back to `mp4` when unknown. Used by the UI to disable
+ * Play buttons on rows that have no playable file.
+ */
+export async function fetchEpisodeExtension(
+  service: PlaybackService,
+  seriesId: string | number,
+  seasonNumber: number,
+  episodeNumber: number
+): Promise<string | null> {
+  try {
+    const data = await fetchSeriesInfo(service, seriesId);
+    const block = (data?.episodes?.[String(seasonNumber)] ?? data?.episodes?.[seasonNumber] ?? []) as EpisodeRow[];
+    const match = block.find((row) => toEpisodeNumber(row?.episode_num) === episodeNumber);
+    return match?.container_extension || FILE_EXTENSION;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSeriesEpisodeId(
+  service: PlaybackService,
+  seriesId: string | number,
+  season: number,
+  episode: number
+): Promise<{ episodeId: string; extension: string }> {
+  const cacheKey = `${service.baseUrl}|${service.username}|${seriesId}|${season}|${episode}`;
+  const cached = seriesEpisodeCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return { episodeId: cached.episodeId, extension: cached.extension };
+  }
+
+  // Cache miss — fetch the full series info (and pre-populate the cache).
+  const data = await fetchSeriesInfo(service, seriesId);
+  const seasonBlock = (data?.episodes?.[String(season)] ?? []) as EpisodeRow[];
+  const match = seasonBlock.find((ep) => toEpisodeNumber(ep.episode_num) === episode);
+  if (!match?.id) {
+    throw new Error(`Eh!IPTV: episódio S${season}E${episode} não encontrado para series_id=${seriesId}`);
+  }
+  const extension = match.container_extension || FILE_EXTENSION;
+  return { episodeId: match.id, extension };
+}
+
+/** Clears both series caches. Call on logout or when the operator
+ *  rotates credentials. */
+export function clearSeriesEpisodeCache() {
+  seriesEpisodeCache.clear();
+  seriesInfoCache.clear();
+}
+
+/**
+ * Build the Xtream Codes playback URL for a single movie or one episode of a
+ * series. Throws when the option is missing its id, the Xtream server cannot
+ * be reached, or a series request lands without season/episode context.
+ *
+ * Movie playback is synchronous (uses `option.id` directly). Series playback
+ * is async because we have to look up the real episode id from the Xtream
+ * API before we can construct the URL.
+ */
+export async function buildPlaybackUrl(
   service: PlaybackService,
   option: StreamOption,
   kind: Kind,
   episode?: { season: number; episode: number }
-): string {
+): Promise<string> {
   const base = service.baseUrl.replace(/\/+$/, "");
   if (!base) throw new Error("Eh!IPTV: baseUrl is required");
   if (!service.username) throw new Error("Eh!IPTV: username is required");
@@ -255,7 +445,13 @@ export function buildPlaybackUrl(
   if (option.id == null || option.id === "") {
     throw new Error("Eh!IPTV: sem series_id para este título");
   }
-  return `${base}/series/${user}/${pass}/${option.id}/${episode.season}/${episode.episode}.${FILE_EXTENSION}`;
+  const { episodeId, extension } = await resolveSeriesEpisodeId(
+    service,
+    option.id,
+    episode.season,
+    episode.episode
+  );
+  return `${base}/series/${user}/${pass}/${episodeId}.${extension}`;
 }
 
 /** Dev / diagnostics handle — re-exports the field/collection names so support tooling can echo them. */
