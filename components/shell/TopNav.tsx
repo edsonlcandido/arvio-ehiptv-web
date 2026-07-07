@@ -5,9 +5,8 @@ import { useApp } from "@/lib/store";
 import type { NavSection } from "@/lib/types";
 
 const nav = [
-  { id: "home", label: "Início", icon: Home },
   { id: "search", label: "Buscar", icon: Search },
-  { id: "watchlist", label: "Minha Lista", icon: Bookmark },
+  { id: "home", label: "Início", icon: Home },
   { id: "tv", label: "TV ao Vivo", icon: Tv }
 ] satisfies Array<{ id: NavSection; label: string; icon: typeof Home }>;
 
@@ -22,8 +21,8 @@ export function TopNav() {
   return (
     <aside className="sidebar" aria-label="Navegação ARVIO">
       <div className="brand-wrap">
-        <a className="brand" href="/" aria-label="ARVIO">
-          <img src="/arvio-logo.svg" alt="" />
+        <a className="brand" href="/" aria-label="ARVIO" data-tv-skip>
+          <img src="/logo-small.png" alt="" />
         </a>
       </div>
       <nav>
@@ -49,7 +48,7 @@ export function TopNav() {
         >
           <Settings size={26} />
         </button>
-        <span className="top-clock">{clock}</span>
+        <span className="top-clock" data-tv-skip>{clock}</span>
       </div>
     </aside>
   );

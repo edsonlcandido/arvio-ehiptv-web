@@ -7,6 +7,7 @@ import {
 import { useState, type ReactNode } from "react";
 import { defaultCatalogs, mergeCatalogs } from "@/lib/catalogs";
 import { useApp } from "@/lib/store";
+import { useAutoFocus } from "@/lib/tv-nav";
 import type { AppSettings, CatalogConfig, HomeServerConfig, StreamServiceConfig } from "@/lib/types";
 
 const SECTIONS = [
@@ -26,6 +27,9 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 
 export function SettingsScreen() {
   const [section, setSection] = useState<SectionId>("vod");
+  // On TV: land focus on the first sidebar button ("Conta Eh!IPTV") so the
+  // user can navigate sections with Up / Down arrows immediately.
+  useAutoFocus(".settings-sidebar .settings-section-btn");
   return (
     <div className="settings-shell">
       <aside className="settings-sidebar">
@@ -156,10 +160,8 @@ function SectionBody({ section }: { section: SectionId }) {
         <Panel title="Rede">
           <Row label="Provedor de DNS">
             <Select value={settings.dnsProvider} onChange={(v) => set({ dnsProvider: v })}
-              options={[["system", "Sistema"], ["cloudflare", "Cloudflare"], ["google", "Google"], ["quad9", "Quad9"]]} />
+              options={[["cloudflare", "Cloudflare"], ["google", "Google"], ["quad9", "Quad9"]]} />
           </Row>
-          <Row label="Mostrar estatísticas de carregamento"><Toggle value={settings.showLoadingStats} onChange={(v) => set({ showLoadingStats: v })} /></Row>
-          <Row label="User agent personalizado" hint="Apenas Android"><input value={settings.customUserAgent} disabled placeholder="Controlado pelo navegador" /></Row>
         </Panel>
       );
     case "tv":
@@ -279,7 +281,7 @@ function VodSection() {
         Credenciais da sua conta <strong>Eh!IPTV</strong>.
       </p>
       <div className="inline-form">
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Usuário" />
+        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Usuário" type="password" />
         <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha" type="password" />
         <button className="primary" onClick={addService}><Plus size={18} /> Adicionar</button>
       </div>

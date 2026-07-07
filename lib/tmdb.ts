@@ -246,9 +246,13 @@ export async function getLogoUrl(item: { mediaType: MediaType; id: number }, lan
 export async function searchMedia(query: string, language = "en-US") {
   if (!query.trim()) return [];
   const response = await tmdb<TmdbList>("search/multi", { query, language });
-  return response.results
+  const items = response.results
     .filter((item) => item.media_type === "movie" || item.media_type === "tv")
     .map((item) => mapTmdbItem(item, item.media_type === "tv" ? "tv" : "movie"));
+  // Filter down to titles that actually exist in the Eh!IPTV catalog — same
+  // guarantee the home rails have, so search results never land on a dead
+  // Play button. Cache + fail-open semantics come from filterByEhIptv itself.
+  return filterByEhIptv(items);
 }
 
 const seasonCache = new Map<string, EpisodeInfo[]>();

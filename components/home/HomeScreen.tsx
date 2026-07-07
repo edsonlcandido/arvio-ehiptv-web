@@ -4,12 +4,16 @@ import { Info, Play, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getLogoUrl } from "@/lib/tmdb";
 import { useApp } from "@/lib/store";
+import { useAutoFocus } from "@/lib/tv-nav";
 import { LazyRail } from "@/components/media/LazyRail";
 import { MediaRail } from "@/components/media/MediaRail";
 import type { Category, MediaItem } from "@/lib/types";
 
 export function HomeScreen() {
   const { hero, categories, catalogConfigs, homeServerRows, continueWatching, openDetails, setHeroPreview, settings } = useApp();
+  // On TV: land focus on the hero Play button — it's the most obvious first
+  // action and works as a "press OK to start watching" affordance.
+  useAutoFocus(".hero-actions .primary");
   const posterMode = settings.cardLayoutMode === "poster";
   const [heroLogo, setHeroLogo] = useState<string | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

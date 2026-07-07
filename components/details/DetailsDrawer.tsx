@@ -3,6 +3,7 @@
 import { Play, Star, UserCircle, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/lib/store";
+import { useFocusOn } from "@/lib/tv-nav";
 import { getReviews, getSeasonEpisodes } from "@/lib/tmdb";
 import { fetchAvailableEpisodeNumbers, type PlaybackService, type StreamOption } from "@/lib/ehiptv";
 import { MediaCard } from "@/components/media/MediaCard";
@@ -78,6 +79,12 @@ function DetailsDrawerView({ item }: { item: MediaItem }) {
   const loading = !item.isHomeServer && streamOptions === null && !isTv
     ? true
     : !item.isHomeServer && streamOptions === null && isTv && Boolean(selectedEpisode);
+  // On TV: lock initial focus to the close button. The Play button's
+  // availability depends on async catalogue lookups (which may not have
+  // resolved when the drawer mounts), so its selector would shift focus
+  // mid-render. Close is always there — Backspace and OK on Close still work
+  // predictably.
+  useFocusOn(".details-drawer .close", true);
 
   return (
     <aside className="details-drawer">

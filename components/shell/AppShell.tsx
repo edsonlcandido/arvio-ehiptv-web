@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useApp } from "@/lib/store";
+import { useTvShell } from "@/lib/tv-nav";
 import { DetailsDrawer } from "@/components/details/DetailsDrawer";
 import { HomeScreen } from "@/components/home/HomeScreen";
 import { LiveTvScreen } from "@/components/livetv/LiveTvScreen";
@@ -23,6 +24,10 @@ const ACCENTS: Record<string, string> = {
 
 export function AppShell() {
   const { section, settings } = useApp();
+  // TV / D-Pad handler — installs the global arrow-key listener and toggles
+  // <html class="is-tv"> so CSS can re-tune layout for big screens. No-op on
+  // desktop / mobile.
+  useTvShell();
 
   useEffect(() => {
     document.documentElement.style.scrollBehavior = settings.smoothScrolling ? "smooth" : "auto";
@@ -37,10 +42,9 @@ export function AppShell() {
     >
       <TopNav />
 
-      <section className="content">
-        <SyncStrip />
-        {section === "home" && <HomeScreen />}
+      <section className="content">  
         {section === "search" && <SearchScreen />}
+        {section === "home" && <HomeScreen />}
         {section === "watchlist" && <WatchlistScreen />}
         {section === "tv" && <LiveTvScreen />}
         {section === "settings" && <SettingsScreen />}

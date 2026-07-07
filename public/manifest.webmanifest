@@ -1,7 +1,7 @@
 {
-  "name": "ARVIO",
-  "short_name": "ARVIO",
-  "description": "ARVIO media hub",
+  "name": "Eh!IPTV Web Player",
+  "short_name": "Eh!IPTV",
+  "description": "Eh!IPTV Web Player",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#02070c",

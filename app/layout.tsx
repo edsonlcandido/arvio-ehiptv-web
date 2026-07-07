@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ARVIO",
-  description: "ARVIO media hub for web, iPad, desktop, and TV browsers",
+  title: "Eh!IPTV Web Player",
+  description: "Eh!IPTV Web Player for web, iPad, desktop, and TV browsers",
   manifest: "/manifest.webmanifest"
 };
 

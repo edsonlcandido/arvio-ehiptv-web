@@ -81,7 +81,6 @@ button {
   height: clamp(38px, 3.05vw, 58px);
   padding: 0;
   border: 0;
-  border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
   display: grid;
   place-items: center;
@@ -1847,3 +1846,144 @@ input:focus {
     scroll-behavior: auto !important;
   }
 }
+
+/* ============================================================
+   TV / D-Pad mode
+   ------------------------------------------------------------
+   Toggled by lib/tv-nav.ts via <html class="is-tv"> when the UA
+   matches a TV browser (Android TV, Chromecast, webOS, Roku,
+   Tizen, etc.) — or when the user manually overrides the mode in
+   Configurações → Aparência → Modo do dispositivo.
+
+   Goals:
+   1. Bigger, unambiguous focus ring so the user knows where they
+      are when navigating with the remote.
+   2. Smaller cards + extra horizontal padding so the rightmost
+      card of a rail isn't clipped by the viewport edge.
+   3. Larger hero actions and top-nav labels — TV distance is ~3m,
+      desktop distance is ~60cm.
+   4. No mouse-hover effects (no mouse on a TV remote).
+   ============================================================ */
+
+html.is-tv {
+  scroll-behavior: smooth !important;
+}
+
+/* Universal focus ring — overrides the more subtle per-element rings so the
+   remote highlight is unmissable from across the room. */
+html.is-tv :where(a, button, input, select, textarea, [tabindex]):focus {
+  outline: none;
+}
+html.is-tv :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 4px solid var(--accent, #ededed) !important;
+  outline-offset: 4px !important;
+  box-shadow: 0 0 0 8px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Kill mouse-hover transforms on TV — without a cursor, hover-lift just
+   makes the wrong card grow while the user watches. */
+html.is-tv .media-card:hover .poster,
+html.is-tv .media-card:focus-visible .poster {
+  transform: scale(1.04);
+}
+html.is-tv .media-card:hover,
+html.is-tv .nav-item:hover,
+html.is-tv .settings-section-btn:hover,
+html.is-tv .pill:hover,
+html.is-tv .episode-row:hover,
+html.is-tv .source-row:hover,
+html.is-tv .icon-button:hover {
+  transform: none !important;
+  background-color: transparent !important;
+}
+/* …but keep the focused state's background so the active button reads. */
+html.is-tv .nav-item:focus-visible,
+html.is-tv .settings-section-btn:focus-visible,
+html.is-tv .pill:focus-visible,
+html.is-tv .episode-row:focus-visible,
+html.is-tv .source-row:focus-visible {
+  background: rgba(237, 237, 237, 0.18) !important;
+}
+
+/* Rail cards: smaller so 3-4 are visible at once, more right-side padding
+   so the user can see there's more to scroll into. */
+html.is-tv .rail {
+  padding: 0 0 0 3.35vw;
+}
+html.is-tv .rail-strip {
+  grid-auto-columns: clamp(220px, 17vw, 320px);
+  gap: clamp(14px, 1vw, 20px);
+  padding: 6px 6.5vw clamp(22px, 3vh, 34px) 0;
+}
+html.is-tv .media-card {
+  width: clamp(220px, 17vw, 320px);
+}
+html.is-tv .media-card strong { font-size: clamp(20px, 1.55vw, 28px); }
+html.is-tv .media-card span { font-size: clamp(14px, 1.1vw, 20px); }
+
+/* Hero actions — bigger on TV, more breathing room. */
+html.is-tv .hero-actions { gap: 22px; margin-top: clamp(20px, 3vh, 36px); }
+html.is-tv .hero .primary,
+html.is-tv .hero .secondary {
+  min-height: clamp(56px, 7vh, 78px);
+  font-size: clamp(20px, 1.55vw, 30px);
+  padding: 0 clamp(28px, 2vw, 40px);
+}
+
+/* Sidebar / top nav — bigger hit targets, larger labels. */
+html.is-tv .nav-item {
+  min-height: clamp(54px, 4vw, 72px);
+  padding: 0 clamp(18px, 1.5vw, 30px);
+  font-size: clamp(20px, 1.55vw, 30px);
+}
+html.is-tv .nav-item svg {
+  width: clamp(22px, 1.65vw, 32px);
+  height: clamp(22px, 1.65vw, 32px);
+}
+html.is-tv .settings-gear {
+  width: clamp(48px, 3.4vw, 64px);
+  height: clamp(48px, 3.4vw, 64px);
+}
+
+/* Search hero input — easier to type on the on-screen keyboard. */
+html.is-tv .search-hero input {
+  min-height: clamp(60px, 5vw, 84px);
+  font-size: clamp(22px, 1.55vw, 28px);
+}
+
+/* Settings — bigger sidebar items, bigger inputs. */
+html.is-tv .settings-section-btn {
+  min-height: clamp(46px, 3.5vw, 60px);
+  font-size: clamp(17px, 1.3vw, 24px);
+  padding: 0 18px;
+}
+html.is-tv .set-row {
+  min-height: clamp(54px, 4vw, 70px);
+  font-size: clamp(17px, 1.3vw, 24px);
+}
+
+/* Drawer close button — easier target for Backspace. */
+html.is-tv .details-drawer .close {
+  width: 72px;
+  height: 72px;
+}
+html.is-tv .details-drawer .detail-actions .primary {
+  min-height: clamp(56px, 5.5vh, 72px);
+  font-size: clamp(18px, 1.4vw, 26px);
+  padding: 0 clamp(24px, 1.8vw, 36px);
+}
+
+/* Player — bigger scrubber thumb on TV, harder to miss. */
+html.is-tv .scrubber::-webkit-slider-thumb,
+html.is-tv .volume-slider::-webkit-slider-thumb {
+  width: 22px;
+  height: 22px;
+  box-shadow: 0 0 0 6px rgba(0, 0, 0, 0.4);
+}
+html.is-tv .scrubber::-moz-range-thumb,
+html.is-tv .volume-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+}
+html.is-tv .scrubber { height: 8px; }
+html.is-tv .volume-slider { height: 7px; }

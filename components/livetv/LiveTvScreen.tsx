@@ -3,6 +3,7 @@
 import { Search, Star, Tv, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/lib/store";
+import { useAutoFocus } from "@/lib/tv-nav";
 import type { IptvChannel, IptvSnapshot } from "@/lib/types";
 
 const ALL = "__all__";
@@ -18,6 +19,10 @@ function fmtTime(ms: number): string {
 
 export function LiveTvScreen() {
   const { iptvSnapshot, settings, setSettings, playChannel } = useApp();
+  // On TV: drop focus on the search input — users almost always want to
+  // start typing a channel name. Falls back gracefully if the input isn't
+  // mounted yet (no service / still loading).
+  useAutoFocus(".category-search input");
   const channels = iptvSnapshot.channels;
   const grouped = iptvSnapshot.grouped;
   const favorites = settings.favoriteChannelIds;
