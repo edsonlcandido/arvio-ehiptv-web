@@ -1909,7 +1909,10 @@ html.is-tv .source-row:focus-visible {
    so the user can see there's more to scroll into. */
 html.is-tv .rail {
   padding: 0 0 0 3.35vw;
+  position: relative;
+  z-index: 5;
 }
+html.is-tv .rail-head { position: relative; z-index: 6; }
 html.is-tv .rail-strip {
   grid-auto-columns: clamp(220px, 17vw, 320px);
   gap: clamp(14px, 1vw, 20px);
@@ -1921,14 +1924,33 @@ html.is-tv .media-card {
 html.is-tv .media-card strong { font-size: clamp(20px, 1.55vw, 28px); }
 html.is-tv .media-card span { font-size: clamp(14px, 1.1vw, 20px); }
 
-/* Hero actions — bigger on TV, more breathing room. */
-html.is-tv .hero-actions { gap: 22px; margin-top: clamp(20px, 3vh, 36px); }
+/* Media card focus ring on TV — use an INSET box-shadow instead of the
+   generic outline, otherwise the ring leaks past the card edge when the
+   card sits at the rail's overflow boundary and gets clipped by the
+   viewport. */
+html.is-tv .media-card:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+html.is-tv .media-card:focus-visible .poster {
+  box-shadow: inset 0 0 0 4px var(--accent, #ededed),
+              0 0 22px rgba(0, 0, 0, 0.65) !important;
+  transform: scale(1.02);
+}
+
+/* Hero: on TV, give the bottom more room so the larger Play/More Info
+   buttons don't collide with the first rail's title ("Filmes em Alta"). */
+html.is-tv .hero {
+  padding-bottom: clamp(180px, 24vh, 260px) !important;
+}
+html.is-tv .hero-actions { gap: 22px; margin-top: clamp(14px, 2.2vh, 28px); }
 html.is-tv .hero .primary,
 html.is-tv .hero .secondary {
   min-height: clamp(56px, 7vh, 78px);
   font-size: clamp(20px, 1.55vw, 30px);
   padding: 0 clamp(28px, 2vw, 40px);
 }
+html.is-tv .hero-copy { position: relative; z-index: 4; }
 
 /* Sidebar / top nav — bigger hit targets, larger labels. */
 html.is-tv .nav-item {
