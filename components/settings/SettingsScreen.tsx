@@ -165,7 +165,10 @@ function SectionBody({ section }: { section: SectionId }) {
     case "tv":
       return (
         <Panel title="TV (IPTV)">
-          <p className="empty">{settings.iptvPlaylists.length} playlist(s) configurada(s). Adicione e gerencie listas, EPG e favoritos na página de TV.</p>
+          <p className="empty">
+            Os canais ao vivo são carregados direto do servidor Xtream Codes configurado em <strong>Conta Eh!IPTV</strong>. O EPG
+            (programação now/next) é baixado automaticamente do mesmo servidor, sem necessidade de configuração manual.
+          </p>
         </Panel>
       );
     case "vod":

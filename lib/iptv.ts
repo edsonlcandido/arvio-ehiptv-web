@@ -1,64 +1,27 @@
 import { jsonRequest, proxiedUrl, textRequest } from "./http";
-import { loadStored, saveStored } from "./storage";
-import type { IptvChannel, IptvNowNext, IptvPlaylistEntry, IptvProgram, IptvSnapshot } from "./types";
-
-const IPTV_KEY = "arvio.web.iptv.playlists";
-
-export function loadPlaylists() {
-  return loadStored<IptvPlaylistEntry[]>(IPTV_KEY, []);
-}
-
-export function savePlaylists(playlists: IptvPlaylistEntry[]) {
-  saveStored(IPTV_KEY, playlists);
-}
+import type { PlaybackService } from "./ehiptv";
+import type { IptvChannel, IptvNowNext, IptvProgram, IptvSnapshot } from "./types";
 
 /**
- * Detect Xtream-style playlist URLs that carry username + password in the
- * query string (m3u.php, get.php, playlist, etc). Returns credentials if
- * recognized, otherwise null and the caller falls back to plain M3U parsing.
+ * Live TV — Xtream Codes edition.
+ *
+ * The reseller no longer manages a playlist of M3U/EPG URLs. Live channels
+ * come from a single Xtream Codes provider (the one configured under
+ * "Conta Eh!IPTV" in Settings) via the standard `get_live_streams` and
+ * `get_live_categories` actions, and the EPG is fetched from the provider's
+ * own `epg.php?username=…&password=…` endpoint (also standard Xtream Codes).
+ *
+ * The Xtream `epg.php` returns an XMLTV document, so the same parser handles
+ * both cases — we just generate the URL from the credentials instead of
+ * asking the operator to paste it.
  */
-function extractXtreamCreds(m3uUrl: string): { server: string; username: string; password: string } | null {
-  try {
-    const u = new URL(m3uUrl);
-    const username = u.searchParams.get("username") ?? u.searchParams.get("u");
-    const password = u.searchParams.get("password") ?? u.searchParams.get("p");
-    if (!username || !password) return null;
-    const looksXtream =
-      /\/player_api\.php/i.test(u.pathname) ||
-      /\/m3u\.php/i.test(u.pathname) ||
-      /\/get\.php/i.test(u.pathname) ||
-      /\/playlist$/i.test(u.pathname) ||
-      /\/enigma2\.php/i.test(u.pathname);
-    if (!looksXtream) return null;
-    return {
-      server: `${u.protocol}//${u.host}`,
-      username,
-      password
-    };
-  } catch {
-    return null;
-  }
-}
 
-function xtreamApi(action: string, creds: { server: string; username: string; password: string }, extra?: Record<string, string>) {
-  const url = new URL("/api/xtream", typeof window !== "undefined" ? window.location.origin : "http://localhost");
-  url.searchParams.set("server", creds.server);
-  url.searchParams.set("user", creds.username);
-  url.searchParams.set("pass", creds.password);
-  url.searchParams.set("action", action);
-  if (extra) {
-    for (const [k, v] of Object.entries(extra)) url.searchParams.set(`xtream_${k}`, v);
-  }
-  return url.toString();
-}
+type XtreamLiveCategory = {
+  category_id: string;
+  category_name: string;
+};
 
-function buildStreamUrl(creds: { server: string; username: string; password: string }, type: "live" | "movie" | "series", streamId: string | number, ext?: string) {
-  const base = creds.server.replace(/\/+$/, "");
-  const extension = ext ?? (type === "live" ? "ts" : "mp4");
-  return `${base}/${type}/${encodeURIComponent(creds.username)}/${encodeURIComponent(creds.password)}/${streamId}.${extension}`;
-}
-
-type XtreamStream = {
+type XtreamLiveStream = {
   num?: number;
   stream_id: number;
   name: string;
@@ -71,93 +34,97 @@ type XtreamStream = {
   container_extension?: string;
 };
 
-export async function loadIptvChannels(playlists: IptvPlaylistEntry[]) {
-  return (await loadIptvSnapshot(playlists)).channels;
+function xtreamApi(action: string, service: PlaybackService, extra?: Record<string, string>) {
+  const url = new URL("/api/xtream", typeof window !== "undefined" ? window.location.origin : "http://localhost");
+  url.searchParams.set("server", service.baseUrl);
+  url.searchParams.set("user", service.username);
+  url.searchParams.set("pass", service.password);
+  url.searchParams.set("action", action);
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) url.searchParams.set(`xtream_${k}`, v);
+  }
+  return url.toString();
 }
 
-export async function loadIptvSnapshot(
-  playlists: IptvPlaylistEntry[],
-  favoriteChannels: string[] = [],
-  favoriteGroups: string[] = [],
-  hiddenGroups: string[] = [],
-  groupOrder: string[] = []
-): Promise<IptvSnapshot> {
-  const enabled = playlists.filter((playlist) => playlist.enabled && (playlist.m3uUrl.trim() || playlist.xtreamServer?.trim()));
-  const channelSets = await Promise.all(
-    enabled.map(async (playlist) => {
-      // Native Xtream path: skip M3U, query the API directly via /api/xtream.
-      if (playlist.xtreamServer && playlist.xtreamUser && playlist.xtreamPass) {
-        try {
-          return await loadXtreamChannels(playlist);
-        } catch (err) {
-          console.warn("xtream load failed for", playlist.id, err);
-          return [] as IptvChannel[];
-        }
-      }
-      // M3U URL with embedded Xtream credentials — load via API too.
-      const xtreamCreds = extractXtreamCreds(playlist.m3uUrl);
-      if (xtreamCreds) {
-        try {
-          return await loadXtreamChannels({
-            ...playlist,
-            xtreamServer: xtreamCreds.server,
-            xtreamUser: xtreamCreds.username,
-            xtreamPass: xtreamCreds.password
-          });
-        } catch (err) {
-          console.warn("xtream m3u-load failed for", playlist.id, err);
-          // fall through to plain M3U
-        }
-      }
-      // Plain M3U (HTTP or HTTPS).
-      try {
-        const text = await textRequest(proxiedUrl(playlist.m3uUrl));
-        return parseM3u(text, playlist.id);
-      } catch {
-        return [] as IptvChannel[];
-      }
-    })
-  );
-  const channels = channelSets.flat();
-  const nowNext = await loadNowNext(enabled, channels).catch(() => ({} as Record<string, IptvNowNext>));
-  const hidden = new Set(hiddenGroups);
+function buildLiveStreamUrl(service: PlaybackService, streamId: string | number, ext = "m3u8") {
+  const base = service.baseUrl.replace(/\/+$/, "");
+  return `${base}/live/${encodeURIComponent(service.username)}/${encodeURIComponent(service.password)}/${streamId}.${ext}`;
+}
+
+/** Provider-side EPG endpoint, Xtream Codes convention.
+ *  The channel list comes from the operator's Xtream server (dnstv.top
+ *  today), but the EPG XMLTV comes from a dedicated aggregator
+ *  (p1fast.com) that mirrors the tvg-id of every channel under the
+ *  same credentials. Hard-coded on purpose — operators don't switch
+ *  EPG backends often, and exposing another Settings field is more
+ *  surface area than this app needs. */
+const EPG_BASE_URL = "http://p1fast.com/";
+
+function buildEpgUrl(service: PlaybackService) {
+  const base = EPG_BASE_URL.replace(/\/+$/, "");
+  const u = new URL(`${base}/epg.php`);
+  u.searchParams.set("username", service.username);
+  u.searchParams.set("password", service.password);
+  return u.toString();
+}
+
+/**
+ * Loads the full live snapshot for the operator's Xtream Codes service.
+ *
+ * Returns an empty snapshot (no categories, no channels, no EPG) when no
+ * service is configured — the UI is responsible for surfacing that state to
+ * the user.
+ */
+export async function loadIptvSnapshot(service: PlaybackService | null): Promise<IptvSnapshot> {
+  const empty: IptvSnapshot = {
+    channels: [],
+    grouped: {},
+    nowNext: {},
+    favoriteGroups: [],
+    favoriteChannels: [],
+    hiddenGroups: [],
+    groupOrder: [],
+    loadedAt: 0
+  };
+  if (!service) return empty;
+
+  const channels = await loadXtreamLiveChannels(service).catch((err) => {
+    console.warn("xtream live load failed", err);
+    return [] as IptvChannel[];
+  });
+  if (!channels.length) return { ...empty, loadedAt: Date.now() };
+
+  const nowNext = await loadNowNext(service, channels).catch(() => ({} as Record<string, IptvNowNext>));
   const grouped = channels.reduce<Record<string, IptvChannel[]>>((acc, channel) => {
-    const group = channel.group || "Uncategorized";
-    if (hidden.has(group)) return acc;
+    const group = channel.group || "Sem categoria";
     acc[group] = [...(acc[group] ?? []), channel];
     return acc;
   }, {});
-  const orderedGroups = groupOrder.filter((group) => grouped[group]).concat(Object.keys(grouped).filter((group) => !groupOrder.includes(group)));
+
   return {
     channels,
-    grouped: Object.fromEntries(orderedGroups.map((group) => [group, grouped[group]])),
+    grouped,
     nowNext,
-    favoriteChannels,
-    favoriteGroups,
-    hiddenGroups,
-    groupOrder,
+    favoriteGroups: [],
+    favoriteChannels: [],
+    hiddenGroups: [],
+    groupOrder: [],
     loadedAt: Date.now()
   };
 }
 
 /**
- * Loads live channels from a Xtream Codes provider via the /api/xtream proxy.
- * Categories become channel groups; the EPG channel id is preserved so the
- * existing XMLTV loader can still match programs.
+ * Loads live channels from the Xtream Codes provider via the /api/xtream
+ * proxy. Categories become channel groups; the EPG channel id is preserved
+ * so the XMLTV loader can still match programs.
  *
  * The stream URL is wrapped through /api/proxy so the browser sees HTTPS
  * regardless of whether the upstream is HTTP or HTTPS.
  */
-async function loadXtreamChannels(playlist: IptvPlaylistEntry): Promise<IptvChannel[]> {
-  const creds = {
-    server: playlist.xtreamServer!,
-    username: playlist.xtreamUser!,
-    password: playlist.xtreamPass!
-  };
-
+async function loadXtreamLiveChannels(service: PlaybackService): Promise<IptvChannel[]> {
   const [categories, streams] = await Promise.all([
-    jsonRequest<Array<{ category_id: string; category_name: string }>>(xtreamApi("get_live_categories", creds)).catch(() => []),
-    jsonRequest<XtreamStream[]>(xtreamApi("get_live_streams", creds)).catch(() => [])
+    jsonRequest<XtreamLiveCategory[]>(xtreamApi("get_live_categories", service)).catch(() => []),
+    jsonRequest<XtreamLiveStream[]>(xtreamApi("get_live_streams", service)).catch(() => [])
   ]);
   const groupById = new Map(categories.map((cat) => [String(cat.category_id), cat.category_name]));
 
@@ -166,14 +133,14 @@ async function loadXtreamChannels(playlist: IptvPlaylistEntry): Promise<IptvChan
     .map((stream) => {
       // Prefer m3u8 (hls.js handles it natively with codec-agnostic fallback);
       // fall back to .ts in case the provider doesn't serve HLS for that channel.
-      const m3u8Url = buildStreamUrl(creds, "live", stream.stream_id, "m3u8");
+      const m3u8Url = buildLiveStreamUrl(service, stream.stream_id, "m3u8");
       const proxied = proxiedUrl(m3u8Url, {
         "user-agent": navigator.userAgent
       });
       return {
-        id: `${playlist.id}:xtream:${stream.stream_id}`,
+        id: `xtream:${stream.stream_id}`,
         name: stream.name || `Channel ${stream.stream_id}`,
-        group: groupById.get(String(stream.category_id ?? "")) || "Uncategorized",
+        group: groupById.get(String(stream.category_id ?? "")) || "Sem categoria",
         logo: stream.stream_icon,
         tvgId: stream.epg_channel_id,
         number: stream.num !== undefined ? String(stream.num) : undefined,
@@ -186,65 +153,21 @@ async function loadXtreamChannels(playlist: IptvPlaylistEntry): Promise<IptvChan
     });
 }
 
-export function parseM3u(text: string, playlistId = "default") {
-  const lines = text.split(/\r?\n/);
-  const channels: IptvChannel[] = [];
-  let pending: Record<string, string> | null = null;
-
-  for (const line of lines) {
-    if (line.startsWith("#EXTINF")) {
-      const title = line.split(",").slice(1).join(",").trim();
-      pending = {
-        name: title,
-        group: attr(line, "group-title") || "Uncategorized",
-        logo: attr(line, "tvg-logo"),
-        tvgId: attr(line, "tvg-id"),
-        number: attr(line, "tvg-chno"),
-        catchupDays: attr(line, "catchup-days") || attr(line, "timeshift"),
-        catchupType: attr(line, "catchup"),
-        catchupSource: attr(line, "catchup-source"),
-        language: attr(line, "tvg-language"),
-        country: attr(line, "tvg-country")
-      };
-    } else if (pending && line.trim() && !line.startsWith("#")) {
-      const streamUrl = line.trim();
-      channels.push({
-        id: `${playlistId}:${pending.tvgId || pending.name}:${channels.length}`,
-        name: pending.name || "Channel",
-        group: pending.group || "Uncategorized",
-        logo: pending.logo,
-        tvgId: pending.tvgId,
-        number: pending.number,
-        catchupDays: Number(pending.catchupDays || 0),
-        catchupType: pending.catchupType,
-        catchupSource: pending.catchupSource,
-        language: pending.language,
-        country: pending.country,
-        streamUrl
-      });
-      pending = null;
-    }
-  }
-
-  return channels;
-}
-
-async function loadNowNext(playlists: IptvPlaylistEntry[], channels: IptvChannel[]) {
-  const urls = playlists.flatMap((playlist) => [playlist.epgUrl, ...(playlist.epgUrls ?? [])]).filter((url): url is string => Boolean(url?.trim()));
-  if (!urls.length || !channels.length) return {};
-  const programsById: Record<string, IptvProgram[]> = {};
+async function loadNowNext(service: PlaybackService, channels: IptvChannel[]) {
+  if (!channels.length) return {};
+  const epgUrl = buildEpgUrl(service);
   const channelLookup = new Map(channels.flatMap((channel) => [
     [channel.tvgId?.toLowerCase(), channel.id],
     [channel.name.toLowerCase(), channel.id]
   ].filter((pair): pair is [string, string] => Boolean(pair[0]))));
 
-  const xmlTexts = await Promise.all(urls.slice(0, 3).map((url) => textRequest(proxiedUrl(url)).catch(() => "")));
-  for (const xml of xmlTexts) {
-    for (const program of parseXmltv(xml)) {
-      const channelId = channelLookup.get(program.channel.toLowerCase());
-      if (!channelId) continue;
-      programsById[channelId] = [...(programsById[channelId] ?? []), program.program];
-    }
+  const xml = await textRequest(proxiedUrl(epgUrl)).catch(() => "");
+  if (!xml) return {};
+  const programsById: Record<string, IptvProgram[]> = {};
+  for (const program of parseXmltv(xml)) {
+    const channelId = channelLookup.get(program.channel.toLowerCase());
+    if (!channelId) continue;
+    programsById[channelId] = [...(programsById[channelId] ?? []), program.program];
   }
 
   const now = Date.now();
@@ -277,7 +200,7 @@ function parseXmltv(xml: string) {
     results.push({
       channel,
       program: {
-        title: decodeXml(textTag(body, "title") || "Untitled"),
+        title: decodeXml(textTag(body, "title") || "Sem título"),
         description: decodeXml(textTag(body, "desc") || ""),
         startUtcMillis: start,
         endUtcMillis: stop
@@ -313,6 +236,5 @@ function decodeXml(value: string) {
 }
 
 function attr(line: string, name: string) {
-  const match = line.match(new RegExp(`${name}="([^"]*)"`, "i"));
-  return match?.[1] ?? "";
+  return line.match(new RegExp(`${name}="([^"]*)"`, "i"))?.[1] ?? "";
 }

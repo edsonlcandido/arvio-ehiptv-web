@@ -102,9 +102,11 @@ http://dnstv.top/series/52514cxb/tmt83747/122867.mp4
 ${PROVIDER_BASE}/live/${user}/${pass}/${stream_id}.m3u8
 ```
 
-- `stream_id` = id do canal no Xtream (vem do `get_live_streams` ou do M3U).
+- `stream_id` = id do canal no Xtream (vem do `get_live_streams`).
 - `.m3u8` é a extensão padrão do projeto (HLS).
-- A chamada `get_live_streams` retorna o `stream_id` por canal.
+- A chamada `get_live_streams` retorna o `stream_id` por canal. Categorias vêm de `get_live_categories` e viram a coluna da esquerda na tela de TV.
+- EPG (now/next por canal) vem de `${baseUrl}/epg.php?username=…&password=…` — também do Xtream Codes, sem precisar configurar URL.
+- A credencial é a mesma de `streamServices[0]` (Conta Eh!IPTV em Settings). Não tem mais playlist M3U editável.
 
 **Exemplo real**:
 ```

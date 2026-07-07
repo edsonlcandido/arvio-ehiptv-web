@@ -161,24 +161,6 @@ export interface AddonCatalog {
   extra?: Array<{ name: string; isRequired?: boolean; options?: string[] }>;
 }
 
-export interface IptvPlaylistEntry {
-  id: string;
-  name: string;
-  m3uUrl: string;
-  epgUrl?: string;
-  epgUrls?: string[];
-  enabled: boolean;
-  // Xtream Codes native fields — when all three are set the playlist is
-  // loaded directly via /api/xtream. If absent, the code falls back to
-  // parsing m3uUrl as a regular M3U. Auto-detected for m3u.php / get.php /
-  // playlist URLs that already carry credentials in the query string.
-  xtreamServer?: string;
-  xtreamUser?: string;
-  xtreamPass?: string;
-  xtreamIncludeVod?: boolean;
-  xtreamIncludeSeries?: boolean;
-}
-
 export interface IptvChannel {
   id: string;
   name: string;
@@ -314,8 +296,7 @@ export interface AppSettings {
   homeServers: HomeServerConfig[];
   // VOD / on-demand IPTV stream services (movies + series)
   streamServices: StreamServiceConfig[];
-  // IPTV
-  iptvPlaylists: IptvPlaylistEntry[];
+  // IPTV — single Xtream Codes provider, sourced from streamServices[0].
   favoriteChannelIds: string[];
   favoriteGroupIds: string[];
   hiddenGroupIds: string[];

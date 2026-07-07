@@ -3,9 +3,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { getStreams, installAddon as installAddonManifest, loadLocalAddons, saveLocalAddons } from "./addons";
 import { defaultCatalogs, mergeCatalogs } from "./catalogs";
-import { buildPlaybackUrl, fetchStreamOptions, type StreamOption } from "./ehiptv";
+import { buildPlaybackUrl, fetchStreamOptions, type PlaybackService, type StreamOption } from "./ehiptv";
 import { loadHomeServerRows } from "./homeserver";
-import { loadIptvSnapshot, loadPlaylists, savePlaylists } from "./iptv";
+import { loadIptvSnapshot } from "./iptv";
+import { enterFullscreen, exitFullscreen } from "./player";
 import { loadStored, saveStored } from "./storage";
 import { getDetails, loadCatalog, searchMedia } from "./tmdb";
 import type {
@@ -13,7 +14,6 @@ import type {
   Category,
   InstalledAddon,
   IptvChannel,
-  IptvPlaylistEntry,
   CatalogConfig,
   IptvSnapshot,
   MediaItem,
@@ -24,7 +24,7 @@ import { proxiedUrl } from "./http";
 
 const settingsKey = "arvio.web.settings";
 const SETTINGS_VERSION_KEY = "arvio.web.settings.version";
-const CURRENT_SETTINGS_VERSION = 2;
+const CURRENT_SETTINGS_VERSION = 3;
 
 export const defaultSettings: AppSettings = {
   autoPlayNext: true,
@@ -65,7 +65,6 @@ export const defaultSettings: AppSettings = {
   disabledAddonIds: [],
   homeServers: [],
   streamServices: [],
-  iptvPlaylists: [],
   favoriteChannelIds: [],
   favoriteGroupIds: [],
   hiddenGroupIds: [],
@@ -157,10 +156,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [results, setResults] = useState<MediaItem[]>([]);
   const [settings, setSettings] = useState<AppSettings>(() => {
     const stored = loadStored<AppSettings>(settingsKey, defaultSettings);
+    // v2 → v3: drop the obsolete `iptvPlaylists` array — Live TV is now
+    // sourced from streamServices[0] (Xtream Codes) directly, with no
+    // user-editable playlist. Strip it from `stored` so it doesn't leak
+    // into the merged settings object (the field is no longer in
+    // AppSettings, so leaving it in would just rot in localStorage).
+    if (stored && typeof stored === "object" && "iptvPlaylists" in stored) {
+      delete (stored as Record<string, unknown>).iptvPlaylists;
+    }
     const merged: AppSettings = {
       ...defaultSettings,
       ...stored,
-      iptvPlaylists: loadPlaylists(),
       catalogs: mergeCatalogs(stored.catalogs, stored.hiddenCatalogIds)
     };
     const versionRaw = loadStored<string>(SETTINGS_VERSION_KEY, "0");
@@ -210,13 +216,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       void loadHomeServerRows(settings.homeServers).then(setHomeServerRows).catch(() => setHomeServerRows([]));
 
-      const loadedIptv = await loadIptvSnapshot(
-        settings.iptvPlaylists,
-        settings.favoriteChannelIds,
-        settings.favoriteGroupIds,
-        settings.hiddenGroupIds,
-        settings.groupOrder
-      );
+      // Live TV is sourced from the same Xtream Codes service the user
+      // configures under "Conta Eh!IPTV". No separate playlist anymore.
+      const liveService: PlaybackService | null = (settings.streamServices ?? []).find(
+        (candidate) => candidate.enabled && candidate.username && candidate.password && candidate.baseUrl
+      ) ?? null;
+      const loadedIptv = await loadIptvSnapshot(liveService);
 
       setContinueWatching([]);
       setWatchlist([]);
@@ -230,7 +235,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     settings.language,
-    settings.iptvPlaylists,
+    settings.streamServices,
     settings.catalogs,
     settings.hiddenCatalogIds,
     settings.disabledAddonIds,
@@ -248,7 +253,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     saveStored(settingsKey, settings);
     saveStored(SETTINGS_VERSION_KEY, String(CURRENT_SETTINGS_VERSION));
-    savePlaylists(settings.iptvPlaylists);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
@@ -324,6 +328,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setActiveStream(stream);
+    enterFullscreen();
   }, []);
 
   const playTrailer = useCallback(async (item: MediaItem) => {
@@ -350,6 +355,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       url: proxiedUrl(channel.streamUrl),
       description: channel.group
     });
+    enterFullscreen();
   }, []);
 
   const playEhIptv = useCallback(async (
@@ -392,6 +398,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? (option.title || "Filme")
         : `${option.title || "S"} · T${episode!.season}/E${episode!.episode}`
     });
+    enterFullscreen();
     setBusy("");
   }, [settings.streamServices]);
 
@@ -405,6 +412,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const closePlayer = useCallback(() => {
     setActiveStream(null);
     setActiveChannel(null);
+    exitFullscreen();
   }, []);
 
   const loadCatalogRow = useCallback((catalog: CatalogConfig) => loadCatalog(catalog, settings.language), [settings.language]);

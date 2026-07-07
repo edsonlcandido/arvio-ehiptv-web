@@ -811,7 +811,6 @@ input:focus {
   flex-basis: 520px;
 }
 
-.playlist-list,
 .channel-list,
 .login-form {
   display: grid;
@@ -819,7 +818,6 @@ input:focus {
   margin-top: 16px;
 }
 
-.playlist-list button,
 .channel-row,
 .account-row,
 .setting-row {
@@ -833,16 +831,81 @@ input:focus {
   padding: 10px 12px;
 }
 
-.playlist-list button {
-  justify-content: space-between;
-  cursor: pointer;
-}
-
-.playlist-list em,
 .account-row span {
   color: var(--muted);
   font-style: normal;
   font-size: 13px;
+}
+
+/* Live TV — category list (left rail) */
+.live-panel {
+  position: sticky;
+  top: 154px;
+  max-height: calc(100vh - 234px);
+  display: flex;
+  flex-direction: column;
+}
+.category-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 0 14px;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+}
+.category-search:focus-within {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.1);
+}
+.category-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #fff;
+  font-size: 14px;
+}
+.category-search input::placeholder { color: rgba(255, 255, 255, 0.4); }
+.category-search-clear {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+}
+.category-search-clear:hover { color: #fff; }
+.category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.category-list .pill {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 16px;
+  min-height: 42px;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.category-list .pill em {
+  color: rgba(237, 237, 237, 0.55);
+  font-style: normal;
+  font-size: 12px;
 }
 
 .channel-browser {
