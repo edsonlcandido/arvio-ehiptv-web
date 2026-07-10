@@ -144,7 +144,7 @@ async function handleProxy(request: NextRequest) {
   let resolvedUrl = raw;
   try {
     resolvedUrl = new URL(response.url).toString();
-    const requestOrigin = new URL(request.url).origin;
+    const requestOrigin = getPublicOrigin(request);
     const finalParsed = new URL(resolvedUrl);
     if (finalParsed.origin === requestOrigin && finalParsed.pathname.startsWith("/api/proxy")) {
       return jsonError("Proxy redirect loop detected", 508);
@@ -178,13 +178,11 @@ async function handleProxy(request: NextRequest) {
   // If it's an HLS manifest, rewrite ALL URLs (segments, keys, maps, media)
   // so they pass through this proxy. We resolve relative URLs against
   // `resolvedUrl` (post-redirect, with token) instead of the original `raw`.
-  // The rewritten URLs MUST use the public origin (what the browser sees),
-  // not `request.url` origin, otherwise behind a reverse proxy that doesn't
-  // forward Host / X-Forwarded-Host, the segments would point to localhost.
+  // The rewritten URLs are emitted as absolute paths so the browser resolves
+  // them against the page origin — works regardless of how the request hit us.
   if (isHls && response.body) {
     const text = await response.text();
-    const proxyOrigin = getPublicOrigin(request);
-    const rewritten = rewriteHlsManifest(text, resolvedUrl, proxyOrigin);
+    const rewritten = rewriteHlsManifest(text, resolvedUrl);
     outHeaders.set("content-type", upstreamContentType || "application/vnd.apple.mpegurl");
     return new NextResponse(rewritten, {
       status: response.status,
@@ -292,10 +290,20 @@ function decodeHeaders(raw: string | null): Record<string, string> | null {
  * - `#EXT-X-PRELOAD-HINT:URI="..."`
  * - `#EXT-X-START` (no URI, skipped)
  * - `#EXT-X-BYTERANGE` (no URI on the line itself)
+ *
+ * IMPORTANT: rewritten URLs are emitted as ABSOLUTE PATHS (`/api/proxy?url=...`)
+ * rather than absolute URLs with a host. The browser / hls.js resolves them
+ * against the manifest's URL (= the page origin the user is on), so they
+ * automatically work in dev (`http://localhost:3000`), in production behind a
+ * reverse proxy, in Cloudflare tunnels, behind port-forwarding, etc. — without
+ * needing the server to guess the public origin from `Host` / `X-Forwarded-*`
+ * headers (which can be misconfigured). If the page is loaded from
+ * `https://player.ehtudo.app/`, the segments resolve to
+ * `https://player.ehtudo.app/api/proxy?url=...ts`. If from
+ * `http://localhost:3000/`, they resolve to `http://localhost:3000/api/proxy?url=...ts`.
  */
-function rewriteHlsManifest(body: string, baseUrl: string, proxyOrigin: string): string {
+function rewriteHlsManifest(body: string, baseUrl: string): string {
   const base = new URL(baseUrl);
-  const proxyOriginUrl = new URL(proxyOrigin);
 
   return body
     .split(/\r?\n/)
@@ -304,7 +312,7 @@ function rewriteHlsManifest(body: string, baseUrl: string, proxyOrigin: string):
 
       // Comment lines: rewrite URIs inside attribute lists when present.
       if (trimmed.startsWith("#")) {
-        return rewriteHlsAttributeLine(trimmed, base, proxyOriginUrl);
+        return rewriteHlsAttributeLine(trimmed, base);
       }
 
       if (!trimmed) return line;
@@ -317,14 +325,14 @@ function rewriteHlsManifest(body: string, baseUrl: string, proxyOrigin: string):
       }
 
       // Skip if it already routes through this proxy (avoid proxy?url=proxy?url=…).
-      if (isProxyUrl(absolute, proxyOriginUrl)) return line;
+      if (isProxyUrl(absolute)) return line;
 
-      return makeProxyUrl(absolute, proxyOrigin);
+      return makeProxyUrl(absolute);
     })
     .join("\n");
 }
 
-function rewriteHlsAttributeLine(line: string, base: URL, proxyOriginUrl: URL): string {
+function rewriteHlsAttributeLine(line: string, base: URL): string {
   // Match every URI="..." attribute (case-insensitive, quoted with " or ').
   return line.replace(/URI=(["'])([^"']*)\1/gi, (_match, quote, value) => {
     const trimmed = value.trim();
@@ -335,8 +343,8 @@ function rewriteHlsAttributeLine(line: string, base: URL, proxyOriginUrl: URL): 
     } catch {
       return `URI=${quote}${value}${quote}`;
     }
-    if (isProxyUrl(absolute, proxyOriginUrl)) return `URI=${quote}${value}${quote}`;
-    return `URI=${quote}${makeProxyUrl(absolute, proxyOriginUrl.origin)}${quote}`;
+    if (isProxyUrl(absolute)) return `URI=${quote}${value}${quote}`;
+    return `URI=${quote}${makeProxyUrl(absolute)}${quote}`;
   });
 }
 
@@ -347,17 +355,22 @@ function resolveUrl(value: string, base: URL): string {
   return new URL(value, base).toString();
 }
 
-function isProxyUrl(url: string, proxyOriginUrl: URL): boolean {
+function isProxyUrl(url: string): boolean {
+  // Upstream URLs never have `/api/proxy` in their path on legitimate
+  // IPTV/manifest servers, so this is a safe proxy-detector without needing
+  // to know the current origin.
   try {
     const parsed = new URL(url);
-    return parsed.origin === proxyOriginUrl.origin && parsed.pathname.startsWith("/api/proxy");
+    return parsed.pathname === "/api/proxy"
+      || parsed.pathname.startsWith("/api/proxy/")
+      || parsed.pathname.startsWith("/api/proxy?");
   } catch {
     return false;
   }
 }
 
-function makeProxyUrl(target: string, proxyOrigin: string): string {
-  const proxyTarget = new URL("/api/proxy", proxyOrigin);
-  proxyTarget.searchParams.set("url", target);
-  return proxyTarget.toString();
+function makeProxyUrl(target: string): string {
+  // Absolute path — the browser resolves it against the manifest URL,
+  // which is the page origin the user actually loaded. No origin guessing.
+  return `/api/proxy?url=${encodeURIComponent(target)}`;
 }

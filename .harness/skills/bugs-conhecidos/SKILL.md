@@ -185,19 +185,22 @@ function SeasonEpisodes({ item, ... }: Props) {
 
 **Sintoma**: Ao reproduzir canal de TV no servidor de produção, o `m3u8` carrega via proxy, mas os segmentos `.ts` (e qualquer outra URL reescrita dentro do manifesto) saem apontando pra `http://localhost:3000/api/proxy?url=...ts`. O browser (no PC do usuário) tenta buscar no **próprio** localhost e o stream não toca.
 
-**Causa raiz**: `app/api/proxy/route.ts` calculava `proxyOrigin = new URL(request.url).origin` pra montar as URLs absolutas dos segmentos no manifesto HLS reescrito. Quando o app está atrás de um reverse proxy (nginx/caddy/Cloudflare/AWS ALB) que **não** repassa `Host` e `X-Forwarded-Host` corretamente, o Next.js reconstrói `request.url` a partir do socket server-side e ela vira `http://localhost:3000/...`. Em dev funciona porque `window.location.origin` e `request.url` coincidem em `localhost:3000`.
+**Causa raiz**: `app/api/proxy/route.ts` calculava `proxyOrigin = new URL(request.url).origin` (ou tentava adivinhar via headers `Host` / `X-Forwarded-*` / env var `PUBLIC_BASE_URL`) pra montar URLs **absolutas** dos segmentos no manifesto HLS reescrito. Em qualquer deploy atrás de reverse proxy que não repassa `Host` / `X-Forwarded-Host` corretamente, a origem "adivinhada" fica errada (vira `http://localhost:3000` ou `https://localhost:3000` se `X-Forwarded-Proto` chegou). Em dev funciona porque `window.location.origin` e `request.url` coincidem em `localhost:3000`.
 
 **Arquivo original**:
-- `app/api/proxy/route.ts:183` — `const proxyOrigin = new URL(request.url).origin;`
+- `app/api/proxy/route.ts:makeProxyUrl(target, proxyOrigin)` — montava `new URL("/api/proxy", proxyOrigin)` com a origem adivinhada.
 
-**Correção**:
-- Novo helper `getPublicOrigin(request)` em `app/api/proxy/route.ts` que tenta, em ordem: `PUBLIC_BASE_URL` (env) → `X-Forwarded-Host` + `X-Forwarded-Proto` → `Host` + protocolo inferido → `request.url` (último recurso).
-- Linha 183 substituída por `const proxyOrigin = getPublicOrigin(request);`.
-- `.env.example` documenta `PUBLIC_BASE_URL` como escape hatch pra deploys onde o reverse proxy não repassa headers.
+**Correção** (a abordagem robusta, **não** depende de header/env):
+- `makeProxyUrl(target)` agora devolve um **caminho absoluto**: `/api/proxy?url=<ENCODED>`. Sem host, sem origem.
+- Quando o browser / hls.js resolve esse caminho contra a URL do manifesto (= a origem da página que o usuário carregou), o resultado é automaticamente correto em qualquer cenário: dev (`http://localhost:3000`), produção direta, atrás de nginx/caddy/Cloudflare Tunnel, etc.
+- `rewriteHlsManifest` e `rewriteHlsAttributeLine` perderam o parâmetro `proxyOrigin` (não precisam mais dele).
+- `getPublicOrigin(request)` continua existindo (pra detecção de loop de redirect), mas não influencia mais a reescrita de manifesto.
 
-**Como detectar**: DevTools → Network → filtrar `.ts` ou `.m3u8` → ver se a URL do segmento aponta pra `localhost:3000` em vez do domínio público. Conferir se o reverse proxy repassa `Host` (e idealmente `X-Forwarded-Host` / `X-Forwarded-Proto`).
+**Limitações conhecidas**: se o app for servido sob `basePath` no Next.js (ex.: `https://site.com/myapp`), o caminho `/api/proxy` não vai incluir `/myapp` — os segmentos seriam pedidos em `https://site.com/api/proxy?...` em vez de `https://site.com/myapp/api/proxy?...`. O projeto atual não usa `basePath`; se um dia usar, voltar pra abordagem com origem absoluta ou expor `basePath` como env var.
 
-**Não esquecer**: o `request.url` no servidor **NÃO** é confiável pra reconstruir a URL pública quando há reverse proxy. Sempre passar pelos headers `X-Forwarded-*` ou por um override explícito. Não regredir pra `new URL(request.url).origin` na reescrita de manifesto HLS.
+**Como detectar**: DevTools → Network → filtrar `.ts` ou `.m3u8` → ver se a URL do segmento aponta pra `localhost:3000` em vez do domínio público (ou se não aponta pra lugar nenhum — `<base>` resolve errado).
+
+**Não esquecer**: NÃO voltar pra `new URL("/api/proxy", adivinharOrigem(...))` na reescrita de manifesto HLS. Caminho absoluto é o caminho. Qualquer tentativa de "adivinhar" a origem pública no servidor é frágil.
 
 ---
 
