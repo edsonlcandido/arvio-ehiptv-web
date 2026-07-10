@@ -178,9 +178,12 @@ async function handleProxy(request: NextRequest) {
   // If it's an HLS manifest, rewrite ALL URLs (segments, keys, maps, media)
   // so they pass through this proxy. We resolve relative URLs against
   // `resolvedUrl` (post-redirect, with token) instead of the original `raw`.
+  // The rewritten URLs MUST use the public origin (what the browser sees),
+  // not `request.url` origin, otherwise behind a reverse proxy that doesn't
+  // forward Host / X-Forwarded-Host, the segments would point to localhost.
   if (isHls && response.body) {
     const text = await response.text();
-    const proxyOrigin = new URL(request.url).origin;
+    const proxyOrigin = getPublicOrigin(request);
     const rewritten = rewriteHlsManifest(text, resolvedUrl, proxyOrigin);
     outHeaders.set("content-type", upstreamContentType || "application/vnd.apple.mpegurl");
     return new NextResponse(rewritten, {
@@ -200,6 +203,50 @@ async function handleProxy(request: NextRequest) {
 }
 
 // ---------- helpers ----------
+
+/**
+ * Resolve the public origin the BROWSER used to hit this proxy.
+ *
+ * Why not `new URL(request.url).origin`?
+ *   When Next.js runs behind a reverse proxy (nginx, caddy, Cloudflare,
+ *   AWS ALB, ...) that does not forward `Host` / `X-Forwarded-Host`,
+ *   `request.url` is reconstructed from the server-side socket and ends
+ *   up as `http://localhost:3000/...`. If we use that to rewrite segment
+ *   URLs inside the HLS manifest, the browser then tries to fetch
+ *   `http://localhost:3000/api/proxy?url=...ts` from ITS OWN localhost
+ *   and the stream breaks.
+ *
+ * Resolution order:
+ *   1. `PUBLIC_BASE_URL` env var (manual override — escape hatch when the
+ *      reverse proxy can't be reconfigured to forward headers).
+ *   2. `X-Forwarded-Host` + `X-Forwarded-Proto` (set by most reverse proxies).
+ *   3. `Host` header + protocol inferred from hostname.
+ *   4. `request.url` (last resort — only correct when the app is exposed
+ *      directly without a proxy, e.g. local dev).
+ */
+function getPublicOrigin(request: NextRequest): string {
+  const override = process.env.PUBLIC_BASE_URL?.replace(/\/+$/, "");
+  if (override) return override;
+
+  const xfh = request.headers.get("x-forwarded-host");
+  const xfp = request.headers.get("x-forwarded-proto");
+  const host = request.headers.get("host");
+
+  const hostname = (xfh || host || "").trim();
+  if (hostname) {
+    const protocol = (xfp || "").trim()
+      || (/^(localhost|127\.|0\.0\.0\.0|\[?::1\]?)(:\d+)?$/i.test(hostname) ? "http" : "https");
+    return `${protocol}://${hostname}`;
+  }
+
+  // Last resort: server-side URL. Will be wrong behind a misconfigured
+  // reverse proxy, but better than crashing the request.
+  try {
+    return new URL(request.url).origin;
+  } catch {
+    return "";
+  }
+}
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });

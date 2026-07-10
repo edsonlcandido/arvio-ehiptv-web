@@ -181,6 +181,26 @@ function SeasonEpisodes({ item, ... }: Props) {
 
 ---
 
+## 10. .ts de canal ao vivo reescrito com `localhost:3000` em produção
+
+**Sintoma**: Ao reproduzir canal de TV no servidor de produção, o `m3u8` carrega via proxy, mas os segmentos `.ts` (e qualquer outra URL reescrita dentro do manifesto) saem apontando pra `http://localhost:3000/api/proxy?url=...ts`. O browser (no PC do usuário) tenta buscar no **próprio** localhost e o stream não toca.
+
+**Causa raiz**: `app/api/proxy/route.ts` calculava `proxyOrigin = new URL(request.url).origin` pra montar as URLs absolutas dos segmentos no manifesto HLS reescrito. Quando o app está atrás de um reverse proxy (nginx/caddy/Cloudflare/AWS ALB) que **não** repassa `Host` e `X-Forwarded-Host` corretamente, o Next.js reconstrói `request.url` a partir do socket server-side e ela vira `http://localhost:3000/...`. Em dev funciona porque `window.location.origin` e `request.url` coincidem em `localhost:3000`.
+
+**Arquivo original**:
+- `app/api/proxy/route.ts:183` — `const proxyOrigin = new URL(request.url).origin;`
+
+**Correção**:
+- Novo helper `getPublicOrigin(request)` em `app/api/proxy/route.ts` que tenta, em ordem: `PUBLIC_BASE_URL` (env) → `X-Forwarded-Host` + `X-Forwarded-Proto` → `Host` + protocolo inferido → `request.url` (último recurso).
+- Linha 183 substituída por `const proxyOrigin = getPublicOrigin(request);`.
+- `.env.example` documenta `PUBLIC_BASE_URL` como escape hatch pra deploys onde o reverse proxy não repassa headers.
+
+**Como detectar**: DevTools → Network → filtrar `.ts` ou `.m3u8` → ver se a URL do segmento aponta pra `localhost:3000` em vez do domínio público. Conferir se o reverse proxy repassa `Host` (e idealmente `X-Forwarded-Host` / `X-Forwarded-Proto`).
+
+**Não esquecer**: o `request.url` no servidor **NÃO** é confiável pra reconstruir a URL pública quando há reverse proxy. Sempre passar pelos headers `X-Forwarded-*` ou por um override explícito. Não regredir pra `new URL(request.url).origin` na reescrita de manifesto HLS.
+
+---
+
 ## Resumo: checklist antes de mexer em código
 
 - [ ] Se tocar `lib/tmdb.ts`: passar `settings.language` em **toda** função nova.
